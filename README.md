@@ -96,3 +96,8 @@ cd daedalus-sdk && go test ./...   # 全包测试(含金样向量重放)
 - 包内注释一律中文(仓库根 CONVENTIONS)。
 - 本仓不产二进制、不产镜像产物;打包/安装由 `daedalus-core` 的
   `just plugin-pack` 与 `daedalus-plugins/` 各插件仓完成。
+## Where to file issues
+
+请在新仓开 issue。本 issue tracker **仅服务本仓代码**：
+- 跨仓问题（如同时影响 SDK 与 plugins）请先开在本仓，影响面大者会在评论里 cross-link 到其他仓。
+- 老仓 `Daedalusys/Daedalusys` 已于 2026-09-21 archived，历史 issue 保留可读；新 issue 一律开在本仓。
