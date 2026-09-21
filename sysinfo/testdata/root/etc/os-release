@@ -1,0 +1,14 @@
+# Daedalus os-release 测试样本:注释行须被跳过
+NAME="Daedalus OS"
+VERSION="0.1.0 (beta)"
+ID=daedalus
+ID_LIKE="almalinux fedora"
+VERSION_ID=42
+BUILD_ID='single-quoted'
+PRETTY_NAME="Daedalus OS 0.1.0"
+
+NOQUOTE=simple
+EMPTY=
+DANGLING_QUOTE="
+这一行没有等号 应被跳过
+ANSI_COLOR=0;35

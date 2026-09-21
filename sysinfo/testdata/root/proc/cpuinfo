@@ -1,0 +1,9 @@
+processor	: 0
+vendor_id	: FakeVendorGenuine
+cpu family	: 6
+model		: 151
+model name	: Fake Test CPU @ 3.50GHz
+stepping	: 2
+processor	: 1
+model name	: Second Core Should Not Override
+processor	: 2

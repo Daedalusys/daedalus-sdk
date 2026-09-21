@@ -1,0 +1,22 @@
+# 测试夹具:除 [objectmodel] 段外结构完整的策略(即本 plan 之前的旧 valid.toml)。
+# 段整体缺失同样属于损坏策略(fail-closed):Load 必须点名 objectmodel.enabled_kinds。
+[shell]
+allowed_commands = ["echo", "date"]
+binary_dirs = ["/usr/bin", "/bin"]
+allowed_path_prefixes = ["/tmp"]
+blocked_paths = ["/root"]
+clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
+timeout_ms = 5000
+
+[fs]
+allowed_dirs = ["/tmp"]
+
+[audit]
+log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+
+# [blueprints] 段保留(该夹具只缺 [objectmodel],其余结构完整)。
+[blueprints]
+output_dirs = ["/tmp"]
+post_check_commands = ["nginx"]
+reload_services = ["nginx"]
+secret_sources = ["kwallet"]

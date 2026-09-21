@@ -1,0 +1,13 @@
+# 测试夹具:缺字段的策略 —— shell 段缺 blocked_paths/clean_env/timeout_ms,
+# [fs] 与 [audit] 整段缺失。Load 必须逐项点名报错(fail-closed)。
+[shell]
+allowed_commands = ["df", "ls"]
+binary_dirs = ["/usr/bin"]
+allowed_path_prefixes = ["/tmp"]
+
+# [blueprints] 段保留(该夹具只演练 shell/fs/audit/objectmodel 缺字段)。
+[blueprints]
+output_dirs = ["/tmp"]
+post_check_commands = ["nginx"]
+reload_services = ["nginx"]
+secret_sources = ["kwallet"]

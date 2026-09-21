@@ -1,0 +1,20 @@
+# 测试夹具:[objectmodel] 段内含未知键(enabled_kindz 拼写错误)。
+# 未知键拒绝防线必须照常生效:Load 报错点名 objectmodel.enabled_kindz,
+# 证明新增解码字段没有旁路 undecoded-keys 检查。
+[shell]
+allowed_commands = ["echo", "date"]
+binary_dirs = ["/usr/bin", "/bin"]
+allowed_path_prefixes = ["/tmp"]
+blocked_paths = ["/root"]
+clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
+timeout_ms = 5000
+
+[fs]
+allowed_dirs = ["/tmp"]
+
+[audit]
+log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+
+[objectmodel]
+enabled_kinds = ["service"]
+enabled_kindz = ["typo"]

@@ -1,0 +1,24 @@
+# 测试夹具:[blueprints].post_check_commands 为空列表(其余字段合法)。
+# 空列表 = 损坏策略,Load 必须 fail-closed 报错并点名 blueprints.post_check_commands。
+[shell]
+allowed_commands = ["echo", "date"]
+binary_dirs = ["/usr/bin", "/bin"]
+allowed_path_prefixes = ["/tmp"]
+blocked_paths = ["/root"]
+clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
+timeout_ms = 5000
+
+[fs]
+allowed_dirs = ["/tmp"]
+
+[audit]
+log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+
+[objectmodel]
+enabled_kinds = ["service"]
+
+[blueprints]
+output_dirs = ["/tmp"]
+post_check_commands = []
+reload_services = ["nginx"]
+secret_sources = ["kwallet"]

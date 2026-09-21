@@ -1,0 +1,69 @@
+---
+# daedalus-sdk 仓 CI(拆仓后本文件即 SDK 仓的 .github/workflows/test.yml)。
+#
+# 职责:go vet + go test(含 3 点漂移测试:policy.toml ↔ policy.Default() ↔
+# objectmodel 常量)+ 跨仓 layout 漂移守门(拒绝 module 路径含 daedalus-os)。
+#
+# 注意:testdata drift 守门(生产 policy.toml ↔ SDK testdata 副本)不放本仓——
+# SDK 仓独立 CI 没有 daedalus-core 兄弟仓,diff 无法跑;该守门放 core 仓
+# build.yml(core 仓有 SDK 兄弟 checkout + 生产 policy.toml,review Oracle
+# Issue 3 修正)。
+name: SDK Test
+on:
+  pull_request:
+    # 反向白名单:仅忽略纯文档,其余路径变更都触发 CI。
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  push:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+# 并发:同一 ref 同一 workflow 同时只跑一个;新 push 自动取消旧 run。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+# 最小权限默认 contents:read。
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (go vet / go test / drift)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set Up Go Toolchain
+        # go.mod pins `go 1.25.0`;runner image 可能更老,显式 pin。
+        # setup-go 缓存 go.sum;vendor/ 不入库,首次构建走 module proxy。
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: go.sum
+
+      - name: Go Vet
+        # 静态检查:未用 import / 可疑构造等。
+        shell: bash
+        run: go vet ./...
+
+      - name: Go Test (含 3 点漂移测试)
+        # 全量单测,含 policy/objectmodel 的 3 点漂移测试(policy.toml ↔
+        # policy.Default() ↔ objectmodel 常量,三点防漂移链)。
+        shell: bash
+        run: go test ./...
+
+      - name: Cross-repo layout drift gate
+        # 跨仓 layout 漂移守门:拒绝 module 路径含 daedalus-os(旧前缀,拆仓后
+        # 必须为 github.com/Daedalusys/...)。go.mod 与全部 .go 文件都扫。
+        shell: bash
+        run: |
+          if grep -rn "daedalus-os" --include="*.go" --include="go.mod" . 2>/dev/null | grep -v "^\./\.git"; then
+            echo "FAIL: 检测到旧 module 前缀 daedalus-os(应为 github.com/Daedalusys/...)" >&2
+            exit 1
+          fi
+          echo "OK: 无 daedalus-os 残留"

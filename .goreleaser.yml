@@ -1,0 +1,29 @@
+# daedalus-sdk 的 goreleaser 配置(被 .github/workflows/release.yml 消费)。
+#
+# SDK 是纯库(无二进制),goreleaser 不构建任何可执行文件,只产出:
+#   - source tarball(semver 化,第三方 `go get github.com/Daedalusys/daedalus-sdk@vX.Y.Z`
+#     消费;review Oracle Issue 2)
+#   - SBOM(syft 生成,附到 release)
+#   - SLSA provenance(cosign 生成 build level 2 attestation,需 workflow 的
+#     id-token: write 权限;review Oracle Issue 6)
+version: 2
+
+project_name: daedalus-sdk
+
+# 无二进制:SDK 是库,skip 全部 build。
+builds:
+  - skip: true
+
+# source tarball:goreleaser 默认产出 <project>-<version>-source.tar.gz。
+source:
+  enabled: true
+
+# SBOM:syft 对 source 资产生成软件物料清单。
+sbom:
+  enabled: true
+  artifacts: source
+
+# SLSA provenance:cosign 对 source 资产生成 build level 2 attestation。
+provenance:
+  enabled: true
+  artifacts: source

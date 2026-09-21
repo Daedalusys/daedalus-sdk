@@ -1,0 +1,6 @@
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 11111    100    0    0    0     0          0         0    22222    200    0    0    0     0       0
+  eth0: 3333333333 4000 0 0 0 0 0 1000 4444444444 5000 0 0 0 0 0
+veth-short: 999
+无冒号的行应被跳过

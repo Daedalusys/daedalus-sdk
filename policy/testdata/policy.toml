@@ -1,0 +1,80 @@
+# =============================================================================
+# Daedalus 能力策略单一事实源(single source of truth)
+#
+# 本文件定义 shell / fs 能力服务器运行时强制执行的白名单、路径规则、
+# 执行环境与超时。Go 侧由 internal/policy 在服务器启动时读取
+# (解析优先级:DAEDALUS_POLICY_PATH 环境变量 > 本文件生产路径
+# /opt/daedalus/shared/policy.toml > 仓库内开发态回溯路径);
+# 文件缺失时各服务器回退到 internal/policy.Default() 的内嵌默认值,
+# 保证"无 policy 也能启动"。
+#
+# 任何值变更都必须与 internal/shellpolicy、internal/pathguard 的
+# 一致性钉死测试以及 copilot 冻结副本(daedalus/plugin/copilot/policy.ts)
+# 同步评审。
+#
+# ALLOW_COMMANDS 环境变量语义为整体替换(REPLACE,非并集):
+# 存在且非空时,逗号分隔的命令集合整体取代 [shell].allowed_commands。
+#
+# Object Model 字段([objectmodel].enabled_kinds 及各 kind 的资源 schema)的
+# 语义与校验规则单一事实源见 daedalus/core/internal/objectmodel/objectmodel.go;
+# 三点漂移测试(policy.toml ↔ policy.Default() ↔ objectmodel 常量)钉死三侧一致。
+# =============================================================================
+
+[shell]
+# 命令基名白名单(15 项只读/诊断命令,逐字对齐 internal/shellpolicy.DefaultAllowCommands)。
+allowed_commands = ["df", "ls", "cat", "pwd", "uname", "free", "ps", "uptime", "whoami", "ip", "arch", "hostname", "date", "ping", "systemctl"]
+
+# 允许命令所在的二进制目录(带 '/' 前缀的命令路径 realpath 后必须落于其中之一)。
+binary_dirs = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+
+# 路径型参数允许的前缀白名单(9 项,逐字对齐 internal/shellpolicy.AllowedPathPrefixes)。
+allowed_path_prefixes = ["/home", "/var/log", "/tmp", "/proc", "/sys", "/etc/os-release", "/usr/lib/os-release", "/etc/fedora-release", "/etc/almalinux-release"]
+
+# 显式禁止的敏感路径(5 项,前缀匹配带 '/' 边界,优先于允许前缀)。
+blocked_paths = ["/etc/shadow", "/etc/gshadow", "/etc/sudoers", "/etc/sudoers.d", "/root"]
+
+# 子进程净化执行环境(键值对整体替换,零继承宿主环境变量)。
+clean_env = { PATH = "/usr/bin:/bin:/usr/sbin:/sbin", LANG = "C.UTF-8" }
+
+# 命令执行超时(毫秒;到期对整个进程组 SIGKILL,回传退出码 124)。
+timeout_ms = 30000
+
+[fs]
+# 文件系统能力服务器可访问的目录白名单(3 项,逐字对齐 internal/pathguard.AllowedDirs)。
+allowed_dirs = ["/home", "/var/log", "/tmp"]
+
+[audit]
+# 哈希链审计日志路径(运行时仍可被 DAEDALUS_AUDIT_LOG_PATH 环境变量覆盖)。
+log_path = "/var/log/daedalus/audit.jsonl"
+
+[objectmodel]
+# 对象模型资源 kind 的正向启用白名单(与 [shell]/[fs]/[audit] 并列的第四策略节):
+# 声明式列出**启用**哪些 kind,未列入即未启用;具体 kind 语义与校验规则由
+# 单一事实源 daedalus/core/internal/objectmodel/objectmodel.go 定义
+# (计划 .omo/plans/aios-object-model-alignment.md 的 Object Model 段与决策 25;
+# v1 仅 service 有 provider,其余为保留枚举成员)。
+# fail-closed:空列表视为损坏策略,Go 服务器启动时拒绝加载。
+# 本值与 internal/policy.Default() 及 objectmodel 常量由防漂移测试三点钉死。
+enabled_kinds = ["service", "package"]
+
+[blueprints]
+# 蓝图(blueprint)渲染/校验/重载/密钥来源策略节(计划 daedalus-blueprint-p1
+# 决策 5 / todo 10,与 [shell]/[fs]/[audit]/[objectmodel] 并列的第五策略节):
+# 声明式列出蓝图渲染输出允许目录、post_check/pre_check 可执行命令白名单、
+# reload 允许触发的服务名与 secret 引用解析来源。
+# fail-closed:任一空列表视为损坏策略,Go 服务器启动时拒绝加载。
+# 本值与 internal/policy.Default() 由三点漂移测试(todo 9)钉死一致;
+# post_check 白名单的运行时消费方见 internal/shellpolicy 的
+# RegisterBlueprintsPostCheckSource 钩子(todo 16 由 MCP server 启动时注册)。
+
+# 蓝图渲染输出的允许目录(前缀白名单,与 pathguard 联动)。
+output_dirs = ["/etc/nginx/conf.d", "/etc/haproxy", "/etc/postgresql", "/etc/redis"]
+
+# post_check / pre_check 可执行的命令白名单(严格子集,独立于 [shell].allowed_commands)。
+post_check_commands = ["nginx", "haproxy", "psql", "redis-cli", "systemctl", "grep"]
+
+# reload 允许触发的服务名(经 daedalus-tx 的 service.set 通道)。
+reload_services = ["nginx", "haproxy", "postgresql", "redis"]
+
+# secret 引用解析来源(用户态)。
+secret_sources = ["kwallet", "credstore"]

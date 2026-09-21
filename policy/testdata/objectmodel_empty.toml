@@ -1,0 +1,25 @@
+# 测试夹具:[objectmodel].enabled_kinds 为空列表。空列表 = 损坏策略,
+# Load 必须 fail-closed 报错并点名 objectmodel.enabled_kinds。
+[shell]
+allowed_commands = ["echo", "date"]
+binary_dirs = ["/usr/bin", "/bin"]
+allowed_path_prefixes = ["/tmp"]
+blocked_paths = ["/root"]
+clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
+timeout_ms = 5000
+
+[fs]
+allowed_dirs = ["/tmp"]
+
+[audit]
+log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+
+[objectmodel]
+enabled_kinds = []
+
+# [blueprints] 段取合法值(该夹具只演练 [objectmodel] 空列表的 fail-closed)。
+[blueprints]
+output_dirs = ["/tmp"]
+post_check_commands = ["nginx"]
+reload_services = ["nginx"]
+secret_sources = ["kwallet"]

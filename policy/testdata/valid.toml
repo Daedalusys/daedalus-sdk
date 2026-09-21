@@ -1,0 +1,28 @@
+# internal/policy 测试夹具:结构完整但取值刻意偏离默认值的合法策略,
+# 用于证明 Load 逐字段透传(而不是偷偷回退 Default)。
+[shell]
+allowed_commands = ["echo", "date"]
+binary_dirs = ["/usr/bin", "/bin"]
+allowed_path_prefixes = ["/tmp"]
+blocked_paths = ["/root"]
+clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
+timeout_ms = 5000
+
+[fs]
+allowed_dirs = ["/tmp"]
+
+[audit]
+log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+
+# objectmodel 段取值同样刻意偏离 Default()(启用 service + package 两种 kind),
+# 证明 [objectmodel].enabled_kinds 逐字段透传解析。
+[objectmodel]
+enabled_kinds = ["service", "package"]
+
+# blueprints 段取值同样刻意偏离 Default()(output_dirs 用 /tmp 而非真实目录等),
+# 证明 [blueprints] 各字段逐字段透传解析。
+[blueprints]
+output_dirs = ["/tmp"]
+post_check_commands = ["nginx"]
+reload_services = ["nginx"]
+secret_sources = ["kwallet"]
