@@ -161,12 +161,12 @@ func TestRegistry_MustLoad_Happy(t *testing.T) {
 // 相对路径 ../../../plugin/blueprint/blueprints 从本包目录
 // (daedalus/core/internal/blueprint,go test 的 cwd 即包目录)上溯到
 // daedalus/plugin/blueprint/blueprints。若相对路径在某个执行环境下不稳
-// (文件不存在),Skip 而非失败——真实嵌入数据的加载验证归属 todo 15 的
+// (文件不存在),Skip 而非失败——真实嵌入数据的加载验证归属
 // //go:embed + TestRegistry_LoadEmbedded。
 func TestRegistry_Load_RealBlueprints(t *testing.T) {
 	const dir = "../../../plugin/blueprint/blueprints"
 	if _, err := os.Stat(dir); err != nil {
-		t.Skipf("真实蓝图目录 %s 不可达(%v);嵌入数据加载验证归 todo 15", dir, err)
+		t.Skipf("真实蓝图目录 %s 不可达(%v);嵌入数据加载验证归 TestRegistry_LoadEmbedded", dir, err)
 	}
 	bs, err := Load(os.DirFS(dir))
 	if err != nil {
@@ -175,7 +175,7 @@ func TestRegistry_Load_RealBlueprints(t *testing.T) {
 	if len(bs) != 6 {
 		t.Fatalf("真实蓝图数 = %d,期望 6", len(bs))
 	}
-	// 6 个真实蓝图按 id 字典序齐全,且与前一个 todo 的脚手架数据一致。
+	// 6 个真实蓝图按 id 字典序齐全,且与下方夹具的期望顺序一致。
 	wantIDs := []string{
 		"haproxy-backend", "nginx-reverse-proxy", "nginx-vhost",
 		"postgres-db", "postgres-user", "redis-acl",

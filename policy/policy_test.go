@@ -76,7 +76,7 @@ func TestLoad_Happy(t *testing.T) {
 	}
 }
 
-// TestLoad_CorruptTOML 钉死损坏语法 → 报错(服务器据此拒绝启动)。
+// TestLoad_CorruptTOML 锁定损坏语法 → 报错(服务器据此拒绝启动)。
 func TestLoad_CorruptTOML(t *testing.T) {
 	_, err := policy.Load(testdataPath(t, "corrupt.toml"))
 	if err == nil {
@@ -87,7 +87,7 @@ func TestLoad_CorruptTOML(t *testing.T) {
 	}
 }
 
-// TestLoad_MissingFields 钉死缺字段 → 报错且逐项点名。
+// TestLoad_MissingFields 锁定缺字段 → 报错且逐项点名。
 func TestLoad_MissingFields(t *testing.T) {
 	_, err := policy.Load(testdataPath(t, "missing_field.toml"))
 	if err == nil {
@@ -100,7 +100,7 @@ func TestLoad_MissingFields(t *testing.T) {
 	}
 }
 
-// TestLoad_UnknownKey 钉死未知键 → 拒绝(拼写错误不得静默通过)。
+// TestLoad_UnknownKey 锁定未知键 → 拒绝(拼写错误不得静默通过)。
 func TestLoad_UnknownKey(t *testing.T) {
 	_, err := policy.Load(testdataPath(t, "unknown_key.toml"))
 	if err == nil {
@@ -113,7 +113,7 @@ func TestLoad_UnknownKey(t *testing.T) {
 	}
 }
 
-// TestPolicy_ObjectModel 钉死 [objectmodel] 段的端到端解析:
+// TestPolicy_ObjectModel 锁定 [objectmodel] 段的端到端解析:
 // 夹具(valid.toml)与仓库真实 shared/policy.toml(经 ResolvePath 开发态回溯,
 // 命中 testdata/policy.toml 生产一致副本)
 // 都必须把 enabled_kinds 解进 Policy.ObjectModel,且真实策略与 Default() 零漂移。
@@ -151,7 +151,7 @@ func TestPolicy_ObjectModel(t *testing.T) {
 	}
 }
 
-// TestPolicy_ObjectModel_RejectsEmpty 钉死 fail-closed:空 enabled_kinds
+// TestPolicy_ObjectModel_RejectsEmpty 锁定 fail-closed:空 enabled_kinds
 // 列表视为损坏策略,Load 必须点名 objectmodel.enabled_kinds 拒绝。
 func TestPolicy_ObjectModel_RejectsEmpty(t *testing.T) {
 	_, err := policy.Load(testdataPath(t, "objectmodel_empty.toml"))
@@ -163,7 +163,7 @@ func TestPolicy_ObjectModel_RejectsEmpty(t *testing.T) {
 	}
 }
 
-// TestPolicy_ObjectModel_RejectsMissingSection 钉死:文件存在但 [objectmodel]
+// TestPolicy_ObjectModel_RejectsMissingSection 锁定:文件存在但 [objectmodel]
 // 段整体缺失同样属于损坏策略(与其他必需列表同等的 fail-closed 语义)。
 func TestPolicy_ObjectModel_RejectsMissingSection(t *testing.T) {
 	_, err := policy.Load(testdataPath(t, "objectmodel_missing.toml"))
@@ -188,7 +188,7 @@ func TestPolicy_ObjectModel_UnknownKeyRejected(t *testing.T) {
 	}
 }
 
-// TestPolicy_Blueprints 钉死 [blueprints] 段的三点漂移(计划 todo 9):
+// TestPolicy_Blueprints 锁定 [blueprints] 段的三点漂移:
 //  1. policy.toml 的 4 个键值 ↔ Default().Blueprints 完全一致(读仓库真实
 //     shared/policy.toml,经 ResolvePath 开发态回溯,与 TestPolicy_ObjectModel
 //     同款写法);
@@ -281,7 +281,7 @@ func TestPolicy_Blueprints(t *testing.T) {
 	})
 }
 
-// TestPolicy_Blueprints_RejectsEmpty 钉死 fail-closed:空 post_check_commands
+// TestPolicy_Blueprints_RejectsEmpty 锁定 fail-closed:空 post_check_commands
 // 列表视为损坏策略,Load 必须点名 blueprints.post_check_commands 拒绝。
 func TestPolicy_Blueprints_RejectsEmpty(t *testing.T) {
 	_, err := policy.Load(testdataPath(t, "blueprints_empty.toml"))
@@ -351,7 +351,7 @@ func TestResolvePath_DevFallback(t *testing.T) {
 }
 
 // TestResolvePath_CrossRepoLayout 覆盖 DevRelPaths 两个候选都命中的场景
-// (计划 todo 4 验收:mono-repo 与 post-split 两种布局至少命中一个):
+// (验收:mono-repo 与 post-split 两种布局至少命中一个):
 //  1. CWD 级 testdata 优先:Go test binary 的 CWD = 包目录,testdata/ 在
 //     level 1 即命中(实际优先级高于跨仓候选);
 //  2. walk-up 跨仓平级命中:嵌套子目录逐级上溯到含
@@ -415,7 +415,7 @@ func TestResolvePath_CrossRepoLayout(t *testing.T) {
 	})
 }
 
-// TestLoadOrDefault_NotFoundFallsBackToDefault 钉死关键稳健性:
+// TestLoadOrDefault_NotFoundFallsBackToDefault 锁定关键稳健性:
 // 三处候选全缺失 → Default() 兜底、零错误(服务器可启动);
 // 而 Load("") 同场景返回 ErrNotFound 供需要严格模式的调用方区分。
 func TestLoadOrDefault_NotFoundFallsBackToDefault(t *testing.T) {
@@ -435,7 +435,7 @@ func TestLoadOrDefault_NotFoundFallsBackToDefault(t *testing.T) {
 	assertPolicyEqual(t, p, policy.Default(), "LoadOrDefault vs Default()")
 }
 
-// TestAllowedCommands_Replace 钉死 REPLACE 语义:env 非空时整体替换
+// TestAllowedCommands_Replace 锁定 REPLACE 语义:env 非空时整体替换
 // (逗号分隔、trim、丢空项),绝不与策略白名单取并集。
 func TestAllowedCommands_Replace(t *testing.T) {
 	p := policy.Default()

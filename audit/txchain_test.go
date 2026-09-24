@@ -1,6 +1,6 @@
 package audit
 
-// txchain_test.go —— todo 13 双链校验(test-first 钉桩):
+// txchain_test.go —— 双链校验:
 //   - 干净 5 事务 × 2-3 步 begin/apply/rollback + 交错非 tx(propose/status/host/shell)日志 → Verify 全过;
 //   - 篡改类 (a) tx_id 文本 / (b) in-tx args: 裸改(不重链) → 全局链以"哈希不符"捕获; 自洽重链后
 //     (全局链完整、旧单链遍历全绿) → 具名 tx 链断裂捕获 —— 双链各自独立咬合;
@@ -18,7 +18,7 @@ import (
 	"testing"
 )
 
-// 事务 ID 常量(十六进制形态, 与 todo 15 的 tx-id 形状一致; D/E 仅夹具使用故内联)。
+// 事务 ID 常量(十六进制形态, 与 tx-id 形状一致; D/E 仅夹具使用故内联)。
 const (
 	txA        = "aaaa1111bbbb2222"
 	txB        = "bbbb2222cccc3333"
@@ -26,7 +26,7 @@ const (
 	txTampered = "ffff9999eeee8888"
 )
 
-// txChainFix 按 todo 15 盖章规则构建夹具的镜像追踪器:
+// txChainFix 按盖章规则构建夹具的镜像追踪器:
 // begin 创世 = 最近非 tx 条目 entry_hash(初始创世 64 零), 步记录 tx_prev = 同事务上一条 entry_hash。
 // Verify 读侧必须与此写侧算法互为逆运算 → 干净日志恒过。
 type txChainFix struct {
@@ -76,7 +76,7 @@ func (c *txChainFix) step(txID, tool, args string) *Record {
 		TxID: txID, TxStep: c.next[txID], TxPrevHash: c.inTx[txID]})
 }
 
-// buildMainFixture 主夹具布局(1 基行号钉死, 篡改测试按行号定位):
+// buildMainFixture 主夹具布局(1 基行号固定, 篡改测试按行号定位):
 //
 //	 1 propose(非tx)  2 A.begin  3 A.apply  4 A.rollback  5 status(非tx)
 //	 6 B.begin  7 C.begin(与 B 共享同一创世 h5, 钉"两 begin 可共一创世")
@@ -180,8 +180,8 @@ func rewrite(t *testing.T, path string, from int, mk func(lineNo int, r Record) 
 	}
 }
 
-// singleChainOld 复刻 todo 13 之前的旧单链遍历: 全局 prev_hash 递推 + entry_hash
-// 重算(todo 12 的 tx 载荷派发保留), 但**绝不**断言 tx_prev_hash。用于承重证明:
+// singleChainOld 复刻双链之前的旧单链遍历: 全局 prev_hash 递推 + entry_hash
+// 重算(tx 载荷派发保留), 但**绝不**断言 tx_prev_hash。用于承重证明:
 // 自洽篡改日志旧链全绿、新双链必须报具名 tx 断裂 —— 断言在 Verify 之前先行执行,
 // 若旧链都过不了则"漏网"前提不成立, 测试当场红。
 func singleChainOld(t *testing.T, path string) {

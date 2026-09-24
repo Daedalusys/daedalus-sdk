@@ -29,10 +29,8 @@ var zipEpoch = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
 // 防恶意/失控的清单文件耗尽内存(zip 条目本身在打包时不做解压放大攻击面)。
 const MaxManifestSize = 1 << 20
 
-// checksumPattern 匹配 "sha256:<64 位小写十六进制>"。
 var checksumPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// validChecksum 判断 checksum 字符串的形态。
 func validChecksum(sum string) bool { return checksumPattern.MatchString(sum) }
 
 // Sha256Hex 返回数据字节的 "sha256:<hex>" 摘要(打包器与校验器共用)。
@@ -58,7 +56,6 @@ func readFileLimited(path string, limit int64) ([]byte, error) {
 	return data, nil
 }
 
-// packEntry 是打包过程中的单个待写入条目。
 type packEntry struct {
 	name string // zip 内 POSIX 相对路径
 	path string // 磁盘绝对路径
@@ -118,7 +115,6 @@ func Pack(srcDir, outPath string) (*Manifest, error) {
 		return nil, err
 	}
 
-	// executable 必须真实存在于包内。
 	found := false
 	for _, e := range entries {
 		if e.name == m.Executable {
@@ -132,7 +128,6 @@ func Pack(srcDir, outPath string) (*Manifest, error) {
 		return nil, fmt.Errorf("字段 executable 非法:%q 在输入目录 %s 中不存在", m.Executable, srcDir)
 	}
 
-	// 计算 checksums:每个文件条目 + manifest 自身(规范化摘要)。
 	checksums := make(map[string]string, len(entries)+1)
 	for _, e := range entries {
 		data, err := os.ReadFile(e.path)

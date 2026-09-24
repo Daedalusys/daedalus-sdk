@@ -127,7 +127,7 @@ func flipHex(c byte) string {
 	return "0"
 }
 
-// TestVerify_ZipBomb 钉死单条目限额:声明尺寸与真实尺寸两条路径都要拦下。
+// TestVerify_ZipBomb 锁定单条目限额:声明尺寸与真实尺寸两条路径都要拦下。
 func TestVerify_ZipBomb(t *testing.T) {
 	src := writeMinimalPlugin(t, "")
 	zipPath := filepath.Join(t.TempDir(), "pkg.zip")
@@ -145,7 +145,7 @@ func TestVerify_ZipBomb(t *testing.T) {
 	}
 }
 
-// TestVerify_CollectionMismatch 钉死条目集合与 checksums 集合的双向一致性。
+// TestVerify_CollectionMismatch 锁定条目集合与 checksums 集合的双向一致性。
 func TestVerify_CollectionMismatch(t *testing.T) {
 	src := writeMinimalPlugin(t, "")
 

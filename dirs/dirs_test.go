@@ -47,8 +47,6 @@ func unwritableDir(t *testing.T) string {
 	return d
 }
 
-// ──── Dir ────
-
 func TestDirs_Dir_EnvWinsWhenAbsolute(t *testing.T) {
 	// Given: env 指向一个尚不存在的绝对路径,系统候选同样可用(证明优先级)。
 	envDir := filepath.Join(t.TempDir(), "chosen")
@@ -122,7 +120,7 @@ func TestDirs_Dir_SystemAbsentCreated(t *testing.T) {
 }
 
 func TestDirs_Dir_HomeEmptyYieldsExplicitError(t *testing.T) {
-	// Given: 系统候选不可写 + HOME 置空(Failure QA 钉死的复现夹具)。
+	// Given: 系统候选不可写 + HOME 置空(Failure QA 固化的复现夹具)。
 	sys := unwritableDir(t)
 	t.Setenv("HOME", "")
 
@@ -167,8 +165,6 @@ func TestDirs_Dir_EnvUnusableFallsThroughChain(t *testing.T) {
 		t.Fatalf("env 不可用时应落系统候选 %q,实得 %q", sys, got)
 	}
 }
-
-// ──── File ────
 
 func TestDirs_File_EnvWinsWhenAbsolute(t *testing.T) {
 	// Given: env 指向新目录下的文件路径,父目录尚不存在(探测需 MkdirAll 父)。
@@ -231,8 +227,6 @@ func TestDirs_File_AllUnusableYieldsError(t *testing.T) {
 		}
 	})
 }
-
-// ──── 调用点辅助(TxRoot / StateFile)────
 
 func TestDirs_TxRoot_HappyChain(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tx")

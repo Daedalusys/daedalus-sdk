@@ -59,12 +59,12 @@ func (r *scriptedRunner) wantCalls(t *testing.T, want ...[]string) {
 
 var spawnErr = errors.New(`exec: "rpm": executable file not found in $PATH`)
 
-// —— 注入与校验(镜像 py:18-24 的 ValueError)——
+// —— 注入与校验(镜像 py 版 ValueError)——
 
 func TestSanitize_RejectsInjectionAndEmpty(t *testing.T) {
 	cases := []struct {
 		in   string
-		want string // 期望错误消息(逐字对齐 py:21/py:23)
+		want string // 期望错误消息(与 py 版逐字对齐)
 	}{
 		{";rm -rf", "Invalid package name or pattern: ;rm -rf"},
 		{"", "Package name/pattern cannot be empty."},
@@ -86,7 +86,7 @@ func TestSanitize_RejectsInjectionAndEmpty(t *testing.T) {
 }
 
 func TestSanitize_AcceptsLegalCharset(t *testing.T) {
-	// py:15 字符集 [a-zA-Z0-9_-.:*+] 全族覆盖。
+	// 字符集 [a-zA-Z0-9_-.:*+] 全族覆盖。
 	for _, s := range []string{"kernel", "python3", "systemd-libs-252.1.el9.x86_64", "foo*bar", "podman:latest", "c++", "under_score", "a:b+c*d-e.f"} {
 		got, err := sanitizeQuery(s)
 		if err != nil || got != s {
@@ -95,7 +95,7 @@ func TestSanitize_AcceptsLegalCharset(t *testing.T) {
 	}
 }
 
-// —— dnf_query(py:27-68)——
+// —— dnf_query ——
 
 func TestDnfQuery_RpmHitWhenInstalled(t *testing.T) {
 	r := newRunner(scriptStep{stdout: "  :bash-5.2.15-5.el9.x86_64\nRelease : 5\n"})
@@ -132,7 +132,7 @@ func TestDnfQuery_FallbackToDnfWhenRpmMiss(t *testing.T) {
 }
 
 func TestDnfQuery_FallbackWhenRpmZeroButEmptyStdout(t *testing.T) {
-	// py:50 条件是 returncode==0 AND stdout 非空:零码空输出同样落回退。
+	// 条件是 returncode==0 AND stdout 非空:零码空输出同样落回退。
 	r := newRunner(
 		scriptStep{stdout: "", code: 0},
 		scriptStep{stdout: "hit\n", code: 0},
@@ -155,14 +155,14 @@ func TestDnfQuery_NotFoundInBoth(t *testing.T) {
 	)
 	svc := NewService(r.run)
 	got, _ := svc.DnfQuery(context.Background(), "ghost")
-	// py:66 逐字外壳 + stderr strip。
+	// 逐字外壳 + stderr strip。
 	if want := "Package 'ghost' not found locally or in repositories. No match found."; got != want {
 		t.Errorf("未命中串 = %q,\nwant         %q", got, want)
 	}
 }
 
 func TestDnfQuery_NotFoundWithEmptyStderrCollapsesSpace(t *testing.T) {
-	// py:66 末尾的 `.strip()` 把 "repositories. " 的悬空空格收敛掉。
+	// 末尾的 `.strip()` 把 "repositories. " 的悬空空格收敛掉。
 	r := newRunner(
 		scriptStep{code: 1},
 		scriptStep{code: 1, stderr: ""},
@@ -175,7 +175,7 @@ func TestDnfQuery_NotFoundWithEmptyStderrCollapsesSpace(t *testing.T) {
 }
 
 func TestDnfQuery_RpmSpawnErrorSkipsDnfFallback(t *testing.T) {
-	// py:52-53 —— rpm 启动异常直接 return,不会走到 dnf(等价行为关键测试)。
+	// rpm 启动异常直接 return,不会走到 dnf(等价行为关键测试)。
 	r := newRunner(scriptStep{err: spawnErr})
 	svc := NewService(r.run)
 	got, err := svc.DnfQuery(context.Background(), "bash")
@@ -216,7 +216,7 @@ func TestDnfQuery_RejectsInjection(t *testing.T) {
 	}
 }
 
-// —— dnf_list_installed(py:71-102)——
+// —— dnf_list_installed ——
 
 func TestDnfListInstalled_SortsStripsAndDropsBlanks(t *testing.T) {
 	r := newRunner(scriptStep{stdout: "zsh-5.9-1\n  bash-5.2-5  \n\naaa-1.0\n"})
@@ -242,7 +242,7 @@ func TestDnfListInstalled_EmptyOutputReturnsEmptyList(t *testing.T) {
 }
 
 func TestDnfListInstalled_NonZeroExitIsSingleErrorElement(t *testing.T) {
-	// py:92-94 —— 错误以单元素列表返回而非异常。
+	// 错误以单元素列表返回而非异常。
 	r := newRunner(scriptStep{code: 2, stderr: "rpm: bad pattern\n"})
 	svc := NewService(r.run)
 	got, err := svc.DnfListInstalled(context.Background(), "*")

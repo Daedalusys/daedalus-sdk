@@ -1,4 +1,4 @@
-// pack.go 的往返测试:构造最小插件目录 → 打包 → 校验,并钉死打包器的
+// pack.go 的往返测试:构造最小插件目录 → 打包 → 校验,并锁定打包器的
 // 前置拒绝(缺文件/缺可执行位/符号链接/非法 manifest)。
 package plugin
 
@@ -118,7 +118,7 @@ func mustRead(t *testing.T, path string) []byte {
 	return data
 }
 
-// TestPack_Rejections 钉死打包器的输入侧拒绝规则。
+// TestPack_Rejections 锁定打包器的输入侧拒绝规则。
 func TestPack_Rejections(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -14,7 +14,7 @@ import (
 //   - 落单代理 → 手写 CESU-8 三字节(ED A0-BF 80-BF), 由 encode.go 的自定义
 //     解码路径识别并原样还原为 \udXXX, 保证字节级往返。
 func (p *parser) parseString() (string, error) {
-	p.pos++ // 开引号
+	p.pos++
 	var b strings.Builder
 	for {
 		if p.pos >= len(p.src) {
@@ -57,7 +57,7 @@ func (p *parser) parseString() (string, error) {
 				b.WriteByte('\t')
 				p.pos++
 			case 'u':
-				p.pos++ // 跳过 'u', 游标停在 4 个十六进制位上
+				p.pos++
 				r, err := p.parseHex4()
 				if err != nil {
 					return "", err

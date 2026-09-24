@@ -1,6 +1,6 @@
 package audit
 
-// genesis_seed_test.go —— todo 15 授权的唯一 internal/audit 外科手术: LogAudit
+// genesis_seed_test.go —— LogAudit 事务创世播种:
 // 在持有同一把 flock 时, 对 "TxID 非空且 TxPrevHash 为空" 的事务创世条目
 // (tx_begin)自动播种 tx_prev_hash = 回溯到的最近一条**非 tx**记录 entry_hash
 // (无则 64 零创世)。播种发生在哈希计算之前 → tx 载荷扩展与落盘键都吃到播种值。
@@ -18,7 +18,7 @@ import (
 // sha256Hex 独立参考实现专用(与 tx_test.go 共享的 helper 若已存在则复用)。
 // 这里不重复定义 —— sha256Hex 已在 tx_test.go 声明, 本文件直接用。
 
-// TestAudit_TxGenesisSeedInLogAudit 钉死 LogAudit 播种:
+// TestAudit_TxGenesisSeedInLogAudit 锁定 LogAudit 播种:
 //   - 非 tx 原始记录 → 5 条连续 in-tx(tx-A)→ 另起一个 begin(tx-B):
 //     tx-A 的 begin(step0, 空 prev)播种 = 原始非 tx 记录哈希;
 //     tx-B 的 begin(step0, 空 prev)播种 = **同一条原始非 tx 记录哈希**
@@ -84,7 +84,7 @@ func TestAudit_TxGenesisSeedInLogAudit(t *testing.T) {
 	}
 }
 
-// TestAudit_TxExplicitPrevHashHonored 钉死 "显式 prev 原样尊重": begin 若自带
+// TestAudit_TxExplicitPrevHashHonored 锁定 "显式 prev 原样尊重": begin 若自带
 // 一个非空的(哪怕是他条有效哈希的)TxPrevHash, LogAudit 绝不覆盖它。
 func TestAudit_TxExplicitPrevHashHonored(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "explicit.jsonl")

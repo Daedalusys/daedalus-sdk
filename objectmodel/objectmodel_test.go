@@ -1,9 +1,9 @@
 package objectmodel
 
-// 本文件是 objectmodel 包的表驱动测试(计划 todo 1):
+// 本文件是 objectmodel 包的表驱动测试:
 // 覆盖 Kind 枚举全集、Resource.Validate 的每个接受/拒绝分支、
 // ValidateResource 的 nil 入口,以及 Resource/ServiceState 的
-// JSON 键名契约(供 todo 2/6/7/20 消费方钉死序列化形态)。
+// JSON 键名契约(供消费方锁定序列化形态)。
 
 import (
 	"encoding/json"
@@ -17,7 +17,7 @@ import (
 
 // TestResource_Validate 证明合法 Resource(七个已定义 Kind × 干净 Name)
 // 全部通过校验;空 DesiredState 与通配 "*" Name 亦属合法
-// (todo 8 的 daedalus.service 清单声明 resources: [{kind: service, name: "*"}])。
+// (daedalus.service 清单声明 resources: [{kind: service, name: "*"}])。
 func TestResource_Validate(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -45,7 +45,7 @@ func TestResource_Validate(t *testing.T) {
 	}
 }
 
-// TestResource_Validate_Rejects 覆盖计划 todo 1 验收规定的全部拒绝分支:
+// TestResource_Validate_Rejects 覆盖全部拒绝分支:
 // 空 Kind、未知 Kind、空 Name、Name 含空字节、Name 含 '/'、Name 含 "..";
 // 并证明多个缺陷聚合进同一条错误(镜像 internal/policy 的聚合风格)。
 func TestResource_Validate_Rejects(t *testing.T) {
@@ -95,7 +95,7 @@ func TestResource_Validate_Aggregates(t *testing.T) {
 	}
 }
 
-// TestKind_Values 钉死七个常量的字面量值为小写形式(线协议契约:
+// TestKind_Values 锁定七个常量的字面量值为小写形式(线协议契约:
 // manifest JSON 与 policy.toml enabled_kinds 都用这些小写 token)。
 func TestKind_Values(t *testing.T) {
 	t.Parallel()
@@ -132,7 +132,7 @@ func TestKind_Values(t *testing.T) {
 	}
 }
 
-// TestValidateResource_Nil 证明 nil 条目被拒(todo 2 的清单数组
+// TestValidateResource_Nil 证明 nil 条目被拒(清单数组
 // 允许 JSON null,解出 nil 指针必须在入口挡下)。
 func TestValidateResource_Nil(t *testing.T) {
 	t.Parallel()
@@ -141,8 +141,8 @@ func TestValidateResource_Nil(t *testing.T) {
 	}
 }
 
-// TestResource_JSONRoundTrip 钉死 Resource 的 JSON 键契约
-// (kind / name / desired_state),todo 2 的 manifest 解析依赖它。
+// TestResource_JSONRoundTrip 锁定 Resource 的 JSON 键契约
+// (kind / name / desired_state),manifest 解析依赖它。
 func TestResource_JSONRoundTrip(t *testing.T) {
 	t.Parallel()
 	raw := `{"kind":"service","name":"*","desired_state":"active"}`
@@ -162,9 +162,9 @@ func TestResource_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-// TestServiceState_JSONContract 钉死 ServiceState 的四键序列化契约
-// (kind / name / desired_state / properties),todo 6/7/20 的结果
-// 与状态载荷按此形态落盘/上线(计划第 4 轮评审 pin:Properties 键
+// TestServiceState_JSONContract 锁定 ServiceState 的四键序列化契约
+// (kind / name / desired_state / properties),
+// 与状态载荷按此形态落盘/上线(Properties 键
 // 为 systemctl 属性名原文)。
 func TestServiceState_JSONContract(t *testing.T) {
 	t.Parallel()
@@ -193,7 +193,7 @@ func TestServiceState_JSONContract(t *testing.T) {
 	}
 }
 
-// ===== 计划 todo 4:三点对象模型漂移钉 =====
+// ===== 三点对象模型漂移钉 =====
 //
 // TestObjectModel_Drift 断言三点锁:
 //  (a) policy.Default().ObjectModel.EnabledKinds 的每个取值必须是
@@ -205,7 +205,7 @@ func TestServiceState_JSONContract(t *testing.T) {
 //      未来激活新 kind 必须显式更新本测试(刻意的高摩擦设计,
 //      与 shellpolicy 三点防漂移链同构,见 AGENTS.md CONVENTIONS)。
 //
-// 路径解析说明(计划 todo 4 修正):policy 包测试走 policy.ResolvePath()
+// 路径解析说明:policy 包测试走 policy.ResolvePath()
 // 的 DevRelPaths 候选自 cwd 逐级上溯(其包目录 testdata/ 在 level 1 命中);
 // 本测试(cwd = daedalus-sdk/objectmodel)的包目录没有 testdata 候选,
 // walk-up 命中不到 policy 包的 testdata,故直接以相对路径指向

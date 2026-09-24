@@ -1,5 +1,5 @@
 // verify_zipslip_test.go: extract.go 的 zip-slip 对抗测试——用 stdlib archive/zip
-// 手工构造各类逃逸/畸形包,钉死拒绝路径与"解压目录之外零落盘"两条断言。
+// 手工构造各类逃逸/畸形包,锁定拒绝路径与"解压目录之外零落盘"两条断言。
 package plugin
 
 import (
@@ -178,7 +178,7 @@ func TestVerify_ZipSlipRejections(t *testing.T) {
 	}
 }
 
-// TestVerify_SymlinkAncestorEscape 钉死两道防线之外的第三道:
+// TestVerify_SymlinkAncestorEscape 锁定两道防线之外的第三道:
 // 即使解压目标目录里预先存在指向外部的符号链接目录,
 // 写入途经它的条目也必须被 ensureSafeDir 的逐级 lstat 拦截。
 func TestVerify_SymlinkAncestorEscape(t *testing.T) {

@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// TestConfirmToken_SingleUse 是守门测试(todo 6 桩):
+// TestConfirmToken_SingleUse 是守门测试:
 // 确认令牌单次有效——Verify 成功一次即消费,第二次必须失败。
-// 该契约是 framework "step 间依赖"扩展的早期落地(plan 决策 14)。
+// 该契约是 framework "step 间依赖"扩展的早期落地。
 func TestConfirmToken_SingleUse(t *testing.T) {
 	tok := GenerateConfirmToken("plan-1")
 
@@ -21,7 +21,7 @@ func TestConfirmToken_SingleUse(t *testing.T) {
 	}
 }
 
-// TestConfirmToken_PlanIDMismatch 是守门测试(todo 6 桩):
+// TestConfirmToken_PlanIDMismatch 是守门测试:
 // plan_id 与令牌携带的 PlanID 不匹配必须失败(配对校验)。
 func TestConfirmToken_PlanIDMismatch(t *testing.T) {
 	tok := GenerateConfirmToken("plan-1")

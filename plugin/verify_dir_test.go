@@ -1,6 +1,6 @@
 // VerifyDir(已安装插件目录校验)的测试:宿主 daedalus-host 的
-// verify/list 依赖它与 Verify 共用同一校验核心,本文件钉死
-// "安装目录被篡改必须被拒绝"的交接约束(todo 6 → todo 7)。
+// verify/list 依赖它与 Verify 共用同一校验核心,本文件锁定
+// "安装目录被篡改必须被拒绝"的交接约束。
 package plugin
 
 import (

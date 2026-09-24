@@ -1,6 +1,6 @@
 // extract.go: 带 zip-slip 防护的安全解压引擎(校验器专用)。
 //
-// 威胁模型与逐条防线(计划草案决策 22,"安全重点"):
+// 威胁模型与逐条防线:
 //  1. 条目名含 '..' 段           → 拒绝;
 //  2. 条目名为绝对路径('/' 开头) → 拒绝;
 //  3. 条目名含反斜杠(Windows 分隔符/UNC)→ 拒绝;
@@ -44,10 +44,7 @@ type ExtractedEntry struct {
 	SHA  string // "sha256:<hex>",解压时流式计算
 }
 
-// safeEntryName 校验 zip 条目名并归类。返回:
-//   - rel:  相对 destDir 的净化路径;
-//   - isDir:条目是否表示目录(名以 '/' 结尾);
-//   - err:  违反任何 zip-slip 规则时的拒绝原因。
+// safeEntryName 校验 zip 条目名并归类,违反任何 zip-slip 规则时给出拒绝原因。
 func safeEntryName(name string) (rel string, isDir bool, err error) {
 	if name == "" {
 		return "", false, fmt.Errorf("zip-slip 拒绝:存在空条目名")

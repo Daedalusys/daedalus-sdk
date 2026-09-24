@@ -1,21 +1,10 @@
-// Package i18n 提供 Go 侧本地化字符串查询,与 copilot 插件的 i18n.ts
-// 行为对齐但实现完全独立(Go 无 import.meta.url,改用 //go:embed
-// 把 locales/*.json 嵌入二进制)。
+// Package i18n 提供 Go 侧本地化字符串查询,与 copilot 插件的 i18n.ts 行为对齐
+// 但实现完全独立(Go 无 import.meta.url,改用 //go:embed 把 locales/*.json 嵌入二进制)。
 //
-// 双端共享同一份扁平 JSON 格式({"key": "value"} 一层,无嵌套命名空间):
-// TS 侧从 i18n/<locale>.json 读盘,Go 侧从嵌入 FS 读;P1a 阶段两侧 key
-// 命名空间相互独立——Go 用 host.* 前缀(表格表头、错误文案),TS 用
-// 现有扁平 key(confirm.prompt 等),互不重叠,漂移由
-// scripts/plugin-i18n-sync.sh --check-cross 守门。
-//
-// locale 探测优先级:LC_ALL > LANG > en_US 兜底;
-// 解析 POSIX 形式("zh_CN.UTF-8" → "zh_CN",下划线保留不转连字符)。
-// fallback 链:精确("zh_CN")→ 语言级("zh")→ 兜底("en_US"),每级
-// 缺文件自动降级。未命中 key 返回 key 字符串本身(永不 panic);
-// 占位符 {0} {1} 按参数序号替换,缺参或越界用空串。
-//
-// Init 一次定死,不做热重载(P1a 决策);Init 未调用时 T() lazy 触发
-// 一次 Init,防止裸调用返回裸 key。
+// 双端共享同一份扁平 JSON 格式;两侧 key 命名空间相互独立(Go 用 host.* 前缀,
+// TS 用现有扁平 key),互不重叠,漂移由 scripts/plugin-i18n-sync.sh --check-cross 守门。
+// locale 探测优先级、POSIX 解析与 fallback 链见 Detect;占位符与未命中行为见 T。
+// Init 一次定死,不做热重载;未调用时 T() lazy 触发一次,防止裸调用返回裸 key。
 package i18n
 
 import (
@@ -32,7 +21,6 @@ import (
 //go:embed locales/*.json
 var localesFS embed.FS
 
-// defaultLocale 是 en_US 兜底 locale,与 TS 侧 i18n.ts 一致。
 const defaultLocale = "en_US"
 
 // placeholderRe 匹配 {0} {1} 等 printf 风格序号占位符。
@@ -108,13 +96,9 @@ func ResetForTest() {
 	localesMu.Unlock()
 }
 
-// T 按当前 locale 查 key,替换 {N} 占位符。永远不 panic:
-//   - 未命中 key → 返回 key 本身
-//   - 缺参 / 越界 / 参数为 nil → 该占位符替换为空串
-//   - Init 未调用 → lazy 触发一次 Init
-//
-// 查找顺序:当前 locale → 语言级(如 zh_CN → zh)→ en_US 兜底;均未命中
-// 返 key 本身。
+// T 按当前 locale 查 key,替换 {N} 占位符,永远不 panic:未命中 key 返回 key
+// 本身;缺参/越界/参数为 nil 的占位符替换为空串;Init 未调用则 lazy 触发一次。
+// 查找顺序:当前 locale → 语言级(zh_CN → zh)→ en_US 兜底。
 func T(key string, args ...any) string {
 	currentMu.RLock()
 	loc := current
@@ -147,7 +131,6 @@ func lookup(loc, key string) (string, bool) {
 		if v, ok := dict[key]; ok {
 			return v, true
 		}
-		// fallback 链:精确 → 语言级("zh_CN" → "zh")→ "en_US" → 终止
 		switch {
 		case loc != defaultLocale && strings.Contains(loc, "_"):
 			loc = loc[:strings.IndexByte(loc, '_')]
@@ -159,8 +142,7 @@ func lookup(loc, key string) (string, bool) {
 	}
 }
 
-// loadLocale 从嵌入 FS 读 locales/<loc>.json 并解析为扁平 map;
-// 文件缺失或 JSON 损坏按空表处理(调用方继续走 fallback 链)。
+// loadLocale 从嵌入 FS 读 locales/<loc>.json;文件缺失或 JSON 损坏按空表处理。
 func loadLocale(loc string) map[string]string {
 	empty := map[string]string{}
 	data, err := localesFS.ReadFile("locales/" + loc + ".json")
@@ -174,9 +156,7 @@ func loadLocale(loc string) map[string]string {
 	return dict
 }
 
-// format 按序号替换 {N} 占位符:N 越界或参数为 nil 用空串。
-// 与 TS 侧 t() 的 replace(/\{(\d+)\}/g, ...) 行为一致(无参时占位符
-// 一律清空)。
+// format 按序号替换 {N} 占位符:N 越界或参数为 nil 用空串;与 TS 侧 t() 行为一致。
 func format(msg string, args ...any) string {
 	return placeholderRe.ReplaceAllStringFunc(msg, func(m string) string {
 		n, err := strconv.Atoi(m[1 : len(m)-1])

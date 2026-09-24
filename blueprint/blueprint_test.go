@@ -16,7 +16,7 @@
 // ResolveSecret 完成 secret 引用校验:合法引用才允许解析真值;
 // 明文(非 secret:// 前缀)在 ResolveSecret 即返回 error,绝不流入
 // 渲染结果或 audit 参数。守门测试 TestResolveSecret_FailClosed_NoPlaintext
-// 钉死该防线——若实现绕过 ResolveSecret 直接把明文塞进 audit args,
+// 锁定该防线——若实现绕过 ResolveSecret 直接把明文塞进 audit args,
 // 该测试保持通过但框架约束被违反,review 时以本注释为审查锚点。
 package blueprint
 

@@ -1,8 +1,8 @@
 package audit
 
-// allow: SIZE_OK —— 计划 todo 12 零裁量钉桩 lastNonTxRecord 必须住在本文件,
-// 且 LogAudit 哈希派发与 Record/Entry 的 tx 字段是同一条件扩展的三块拼图;
-// 可独立搬运的 payloadFor/ComputeEntryHashRecord/recordFromValue 已外迁 hashtx.go。
+// allow: SIZE_OK —— lastNonTxRecord 必须住在本文件:它与 LogAudit 哈希派发、
+// Record/Entry 的 tx 字段是同一条件扩展的三块拼图;可独立搬运的 payloadFor /
+// ComputeEntryHashRecord / recordFromValue 已外迁 hashtx.go。
 
 import (
 	"crypto/sha256"
@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// 哈希链与默认值常量, 与 audit-log.py:16-18 逐一对应。
+// 哈希链与默认值常量, 与 audit-log.py 的常量逐一对应。
 const (
 	// GenesisHash 是创世 prev_hash(空文件/无有效尾行时使用), Python GENESIS_HASH = "0"*64。
 	GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -30,7 +30,7 @@ const (
 	tailChunkSize = 4096
 )
 
-// DefaultLogPath 复刻 audit-log.py:16: 环境变量优先, 否则系统默认路径。
+// DefaultLogPath 复刻 audit-log.py 同名逻辑: 环境变量优先, 否则系统默认路径。
 // (argparse 的 --log-path 默认值即该常量, 显式旗标仍可覆盖环境变量。)
 func DefaultLogPath() string {
 	if v := os.Getenv(EnvLogPath); v != "" {
@@ -39,7 +39,7 @@ func DefaultLogPath() string {
 	return systemLogPath
 }
 
-// ComputeEntryHash 计算审计条目哈希, 等价 audit-log.py:21-37 的 compute_entry_hash。
+// ComputeEntryHash 计算审计条目哈希, 等价 audit-log.py 的 compute_entry_hash。
 //
 // args 参数传**已规范化**的 args_str(由 Value.ArgsString 产出, 语义等价 Python 端
 // 接收 args 后内部的 json.dumps 规范化); 载荷拼接顺序严禁改动:
@@ -52,8 +52,8 @@ func ComputeEntryHash(timestamp, identity, tool, args, outcome, prevHash string)
 	return hex.EncodeToString(sum[:])
 }
 
-// Record 是一条完整审计记录, 字段与 audit-log.py:133-142 的 record dict 一致;
-// tx 三元组为 todo 12 的可选扩展: 仅当 TxID 非空时落盘(tx_id/tx_step/tx_prev_hash)
+// Record 是一条完整审计记录, 字段与 audit-log.py 的 record dict 一致;
+// tx 三元组是可选扩展: 仅当 TxID 非空时落盘(tx_id/tx_step/tx_prev_hash)
 // 且参与哈希载荷(见 payloadFor), 非 tx 记录与金样逐字节兼容。
 type Record struct {
 	Timestamp     string
@@ -106,16 +106,16 @@ func (r *Record) IndentJSON() string {
 type Entry struct {
 	Identity      string // 调用者 ID(默认由 CLI 填 "cli")
 	Tool          string // 工具名, 必填
-	Args          *Value // nil 视为 {} (audit-log.py:106-107)
+	Args          *Value // nil 视为 {}
 	Outcome       string // "" 视为 "success"
 	PolicyVersion string // "" 视为 DefaultPolicyVersion
 	LogPath       string // "" 视为 DefaultLogPath()
-	TxID          string // 事务 ID; 非空即触发发射与哈希的条件扩展(todo 12)
+	TxID          string // 事务 ID; 非空即触发发射与哈希的条件扩展
 	TxStep        int    // 事务内步序号(仅 TxID 非空时有意义; begin=0)
 	TxPrevHash    string // 同事务前一步 entry_hash(仅 TxID 非空时落盘并参与哈希)
 }
 
-// LogAudit 追加一条哈希链审计条目, 等价 audit-log.py:85-150 的 log_audit。
+// LogAudit 追加一条哈希链审计条目, 等价 audit-log.py 的 log_audit。
 //
 // 并发协议: 打开(a+ 等价 O_RDWR|O_CREATE|O_APPEND) → flock(LOCK_EX) →
 // 读尾行 prev_hash → 写行 → flush → LOCK_UN(由 defer 在 Close 前释放)。
@@ -135,7 +135,7 @@ func LogAudit(e Entry) (*Record, error) {
 		e.LogPath = DefaultLogPath()
 	}
 
-	// audit-log.py:109-114: 目录不存在则尽力创建, 失败静默忽略(留给 open 报错)。
+	// 目录不存在则尽力创建, 失败静默忽略(留给 open 报错)。
 	if dir := filepath.Dir(e.LogPath); dir != "" {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			_ = os.MkdirAll(dir, 0o755)
@@ -151,13 +151,11 @@ func LogAudit(e Entry) (*Record, error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return nil, fmt.Errorf("audit: flock(LOCK_EX) 失败: %w", err)
 	}
-	// defer 为 LIFO: 本行注册晚于上面的 Close → 退出时先 LOCK_UN 再 Close,
-	// 与 Python try/finally 中"写完后 LOCK_UN、随 with 块关闭文件"顺序一致。
 	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
 
 	prevHash := lastEntryHash(f)
 
-	// 事务创世播种(todo 15): 条目带 TxID 却未显式携带 tx_prev_hash 时, 在**同一把
+	// 事务创世播种: 条目带 TxID 却未显式携带 tx_prev_hash 时, 在**同一把
 	// LOCK_EX 之下**复用 lastNonTxRecord 从刚回溯过的日志尾部取最近一条非 tx 记录的
 	// entry_hash 作为播种值(回溯至 BOE 仍无 → 64 零 GenesisHash)。播种发生在哈希计算
 	// **之前**, 使 tx 载荷扩展(payloadFor)与落盘键(tx_prev_hash)都吃到播种后的值,
@@ -177,7 +175,7 @@ func LogAudit(e Entry) (*Record, error) {
 	}
 
 	timestamp := FormatTimestamp(time.Now())
-	// 哈希派发(todo 12 钉桩): TxID 非空走记录形态(含 tx 载荷扩展),
+	// 哈希派发: TxID 非空走记录形态(含 tx 载荷扩展),
 	// 否则沿用 6 参常量路径 → 非 tx 条目哈希与旧实现逐字节相同。
 	argsStr := e.Args.ArgsString()
 	var entryHash string
@@ -221,7 +219,7 @@ func LogAudit(e Entry) (*Record, error) {
 // FormatTimestamp 复刻 datetime.datetime.now(datetime.timezone.utc).isoformat()。
 //
 // 输出 "YYYY-MM-DDTHH:MM:SS.ffffff+00:00"; **微秒为 0 时 Python 省略整个小数秒段**
-// (audit-log.py:122 的隐性契约, 断链高发点, 单独成函数便于测试该怪癖)。
+// (与 audit-log.py 的隐性契约, 断链高发点, 单独成函数便于测试该怪癖)。
 // 纳秒按 Python 习惯向零截断为微秒, 不做四舍五入。
 func FormatTimestamp(t time.Time) string {
 	t = t.UTC()
@@ -232,7 +230,7 @@ func FormatTimestamp(t time.Time) string {
 	return base + "+00:00"
 }
 
-// lastEntryHash 镜像 audit-log.py:40-82 的 get_last_entry_hash(f):
+// lastEntryHash 镜像 audit-log.py 的 get_last_entry_hash(f):
 // 自文件末尾按 4096 字节块回溯, 收集"最后一个换行边界块"内的行,
 // 倒序找第一条非空且可解析为对象、含 entry_hash 的行; 找不到返回 GenesisHash。
 //
@@ -296,7 +294,7 @@ func lastEntryHash(f *os.File) string {
 
 // lastNonTxRecord 自文件末尾**无界**回溯最近一条完整解析且 TxID 为空(非 tx)的记录。
 //
-// 与 lastEntryHash 的关系与差异(todo 12 关键设计):
+// 与 lastEntryHash 的关系与差异(关键设计):
 //   - lastEntryHash 收集到"最后一个换行边界块"(≤2 行窗口)即停, 尾部若挂任意长的
 //     in-tx 段会直接返回该段的哈希或创世值 —— 无法回答"最后一条非 tx 条目是谁";
 //   - 本函数持续按 tailChunkSize 块向 BOE 扩窗, 行边界规则与"块首行截断则本轮跳过、

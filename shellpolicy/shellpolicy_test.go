@@ -1,4 +1,4 @@
-// shellpolicy 包的表驱动测试:逐条钉死 shell_server.ts:13-209 的白名单语义。
+// shellpolicy 包的表驱动测试:逐条锁定 shell_server.ts 的白名单语义。
 package shellpolicy
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/Daedalusys/daedalus-sdk/policy"
 )
 
-// TestConstantsPinDenoSource 钉死所有规格常量:数量与内容必须与
+// TestConstantsPinDenoSource 锁定所有规格常量:数量与内容必须与
 // shell_server.ts 逐字一致(任何漂移都必须先改此测试并过规格评审)。
 func TestConstantsPinDenoSource(t *testing.T) {
 	wantCommands := []string{
@@ -94,8 +94,7 @@ func TestResolveAllowCommands(t *testing.T) {
 	})
 }
 
-// TestPostCheckAllowCommands 钉死蓝图 post_check 命令白名单(计划
-// daedalus-blueprint-p1 决策 5 / todo 8):出厂默认 7 条、与主白名单
+// TestPostCheckAllowCommands 锁定蓝图 post_check 命令白名单:出厂默认、与主白名单
 // DefaultAllowCommands 相互独立、IsPostCheckAllowed 命中/未命中语义。
 // (orchestrator 修复:systemctl/grep 是合法校验命令,post_check 脚本
 // 用到;白名单从 5 扩到 7,三处同步由漂移测试守护。)
@@ -154,7 +153,7 @@ func TestPostCheckAllowCommands(t *testing.T) {
 	})
 }
 
-// TestRegisterBlueprintsPostCheckSource 钉死蓝图 post_check 注入钩子:
+// TestRegisterBlueprintsPostCheckSource 锁定蓝图 post_check 注入钩子:
 // 注册后 WithPolicy 注入的生效集合 = 读取函数返回值(空集也是合法结果,
 // fail-closed);未注册时 WithPolicy 保持出厂默认;nil 注册被忽略。
 func TestRegisterBlueprintsPostCheckSource(t *testing.T) {
@@ -207,10 +206,10 @@ func TestRegisterBlueprintsPostCheckSource(t *testing.T) {
 	})
 }
 
-// TestBlueprintsPolicyContract 钉死 todo 10 的钩子契约:构造一个带
+// TestBlueprintsPolicyContract 锁定钩子契约:构造一个带
 // Blueprints 的 Policy,注册读取函数后 WithPolicy 注入的生效集合 =
 // p.Blueprints.PostCheckCommands(即 policy.toml 单一事实源的取值,
-// 三点漂移测试的消费方侧证明)。生产接线归 todo 16(MCP server 启动时
+// 三点漂移测试的消费方侧证明)。生产接线在 MCP server 启动时
 // 注册);本测试只证明"Policy.Blueprints 字段 → 钩子 → 生效白名单"的
 // 链路成立,避免 policy↔shellpolicy 循环依赖(policy 不 import shellpolicy)。
 func TestBlueprintsPolicyContract(t *testing.T) {
@@ -220,7 +219,7 @@ func TestBlueprintsPolicyContract(t *testing.T) {
 	})
 
 	// 使用真实 Default() 的 Blueprints(其 PostCheckCommands 与 policy.toml
-	// 由 TestPolicy_Blueprints 钉死一致),确保契约测试吃的是单一事实源取值。
+	// 由 TestPolicy_Blueprints 锁定一致),确保契约测试吃的是单一事实源取值。
 	RegisterBlueprintsPostCheckSource(func(p *policy.Policy) []string {
 		return p.Blueprints.PostCheckCommands
 	})
@@ -364,7 +363,7 @@ func TestValidatePath(t *testing.T) {
 		t.Errorf("空字节消息漂移: %v", err)
 	}
 
-	// 相对路径:先拼 cwd 再规范化(对应 ts:104-108)。
+	// 相对路径:先拼 cwd 再规范化。
 	cwd := mustGetwd(t)
 	if !strings.HasPrefix(cwd, "/tmp") && !strings.HasPrefix(cwd, "/home") {
 		t.Skipf("当前工作目录 %q 不在白名单内,跳过相对路径正例", cwd)

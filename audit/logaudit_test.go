@@ -152,7 +152,7 @@ GARBAGE NOT JSON
 	})
 }
 
-// pythonReplayScript 与 tests/test_mcp_integration.py:344-346 同源公式:
+// pythonReplayScript 与 Python 集成测试同源公式:
 // 对 Go 写出的每一行做哈希重算、链递推、行规范形与时间戳形制检查。
 const pythonReplayScript = `
 import json, hashlib, re, sys
@@ -170,7 +170,7 @@ for i, raw in enumerate(raw_lines, 1):
     assert raw == json.dumps(r, sort_keys=True), f"line {i}: 行字节不一致"
     # 2) 时间戳形制(Python isoformat 两种分支)
     assert TS.match(r["timestamp"]), f"line {i}: 时间戳形制异常 {r['timestamp']}"
-    # 3) 哈希重算(与 audit-log.py:30-37 同式)
+    # 3) 哈希重算(与 audit-log.py 同式)
     args = r["args"]
     args_str = args if isinstance(args, str) else json.dumps(args, sort_keys=True, separators=(",", ":"))
     payload = f"{r['timestamp']}{r['identity']}{r['tool']}{args_str}{r['outcome']}{r['prev_hash']}"

@@ -38,7 +38,6 @@ func encodeValue(v *Value, m encMode) *bytes.Buffer {
 }
 
 // encodeValue 把 v 序列化为 Python json.dumps 语义的 JSON 文本, 写入 buf。
-// depth 为当前容器(开括号所在)的缩进层级。
 func writeValue(buf *bytes.Buffer, v *Value, m encMode, depth int) {
 	switch v.kind {
 	case kindNull:
@@ -144,14 +143,12 @@ func writeEscapedString(buf *bytes.Buffer, s string) {
 			buf.WriteByte(c)
 			i++
 		case isCESUSurrogateAt(s, i):
-			// CESU-8 三字节代理 → \udXXX
 			cp := rune(s[i]&0x0F)<<12 | rune(s[i+1]&0x3F)<<6 | rune(s[i+2]&0x3F)
 			writeU16(buf, cp)
 			i += 3
 		default:
 			r, size := utf8.DecodeRuneInString(s[i:])
 			if r == utf8.RuneError && size == 1 {
-				// 非法 UTF-8 字节: surrogateescape → U+DC00+b
 				buf.WriteString(`\udc`)
 				buf.WriteString(lowerHex([]byte{s[i]})[0:2])
 				i++
@@ -160,7 +157,6 @@ func writeEscapedString(buf *bytes.Buffer, s string) {
 			if r <= 0xFFFF {
 				writeU16(buf, r)
 			} else {
-				// BMP 外 → UTF-16 代理对, 两次 \uXXXX
 				cp := r - 0x10000
 				writeU16(buf, 0xD800+(cp>>10))
 				writeU16(buf, 0xDC00+(cp&0x3FF))
