@@ -4,8 +4,10 @@
 // kind + name + desired_state 三元组描述,而不是散落的裸命令。资源经
 // daedalus.plugin.json 的 `resources` 数组声明,按 kind 路由到对应能力
 // 服务器;每个 kind 是否放行由 policy.toml `[objectmodel].enabled_kinds`
-// 网关强制。本包拥有两个类型:Resource(manifest 声明)与 ServiceState
-// (service.query / service.list / 状态载荷共用的查询结果)。
+// 网关强制。本包拥有声明类型 Resource(manifest 声明)与 ServiceState
+// (service.query / service.list / 状态载荷共用的查询结果),以及 envelope.go
+// 的 spec/status 信封 Object —— 两类载荷都投影进同一信封,是对象模型的
+// 唯一形状来源。
 //
 // 校验与 internal/policy 同风格:Validate 聚合全部缺陷后一次性报错
 // (fail-closed,配置事故不得静默放宽);本包只做形态校验,不感知
@@ -69,12 +71,14 @@ type Resource struct {
 
 // ServiceState 是 service 资源的查询/状态载荷类型(service.query、service.list
 // 与 state.jsonl 共用)。Properties 键为 systemctl 属性名原文;Kind 用裸字符串
-// 而非强类型 Kind,反序列化端零转换。
+// 而非强类型 Kind,反序列化端零转换。Conditions 是 Properties 之上的派生语义层
+// (由 provider 在观测后生成),不替代 Properties。
 type ServiceState struct {
-	Kind         string            `json:"kind"`          // 恒为 "service"(与 Resource.Kind 序列化值同词表)
-	Name         string            `json:"name"`          // 单元名(如 "sshd.service")
-	DesiredState string            `json:"desired_state"` // 期望状态;查询结果可为空(观测态无期望)
-	Properties   map[string]string `json:"properties"`    // systemctl 属性原文键值对
+	Kind         string            `json:"kind"`                 // 恒为 "service"(与 Resource.Kind 序列化值同词表)
+	Name         string            `json:"name"`                 // 单元名(如 "sshd.service")
+	DesiredState string            `json:"desired_state"`        // 期望状态;查询结果可为空(观测态无期望)
+	Properties   map[string]string `json:"properties"`           // systemctl 属性原文键值对
+	Conditions   []Condition       `json:"conditions,omitempty"` // Properties 之上的派生语义,由 provider 观测后生成
 }
 
 // Validate 逐字段校验资源声明,聚合全部缺陷后一次性报错(fail-closed):

@@ -20,7 +20,7 @@ SDK 包由 `daedalus-core/` 与 `daedalus-plugins/` 经 `replace` 指令本地�
 | `pkgquery/` | dnf/rpm 只读查询(rpm 优先、dnf repoquery 兜底) | `daedalus-plugins/pkg` |
 | `sysinfo/` | os-release / cpuinfo / meminfo / 网络只读探测 | `daedalus-plugins/sysinfo` |
 | `plugin/` | manifest schema 校验 + Pack/Extract/Verify/VerifyDir(zip-slip 九道防线) | `daedalus-core/cmd/daedalus-{host,plugin-pack}` |
-| `objectmodel/` | 对象模型 schema 单一事实源(Kind 封闭枚举 7 类 + Resource/ServiceState) | `daedalus-core/internal/controller`、`daedalus-plugins/{service,pkg}` manifest |
+| `objectmodel/` | 对象模型 schema 单一事实源(Kind 封闭枚举 7 类 + Resource/ServiceState + spec/status 信封 `Object`) | `daedalus-core/internal/controller`(别名复用)、`daedalus-plugins/{service,pkg}` manifest、`daedalus-plugins/service` 回包 |
 | `i18n/` | locale 文件与 `t(key, ...args)` 翻译基础设施 | copilot、Go 侧 MCP server(P1 接入) |
 | `blueprint/` | 蓝图 schema 校验 + 渲染(jsonschema-go 预编译) | `daedalus-plugins/blueprint` |
 | `version/` | 版本常量与构建信息 | 各二进制 |
