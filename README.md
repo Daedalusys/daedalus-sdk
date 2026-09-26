@@ -1,6 +1,7 @@
 # daedalus-sdk — Daedalus SDK 仓根
 
-四层结构(决策 23/24 + 25)中的 **SDK 层**:11 个安全核心包 + 5 个 Provider/Slot 占位目录,
+四层结构(决策 23/24 + 25)中的 **SDK 层**:11 个安全核心包 + slot 词汇包 +
+SecretProvider/MemoryProvider 契约包(daedalus-sdk#2 填实)+ 3 个 Provider/Slot 占位目录,
 独立 Go 模块(`module github.com/Daedalusys/daedalus-sdk`),独立仓根。
 SDK 包由 `daedalus-core/` 与 `daedalus-plugins/` 经 `replace` 指令本地引用
 (见各仓 `go.mod`;3 仓平级 clone 后 `go.work` 优先)。
@@ -29,15 +30,23 @@ SDK 包由 `daedalus-core/` 与 `daedalus-plugins/` 经 `replace` 指令本地�
 `dirs/`(state/tx 根路径统一解析链)因 Go internal 跨模块规则随 service 插件迁入本仓,
 不在上述 11 包清单内,但同属 SDK 公开面。
 
-## Provider/Slot 占位(5 个空目录)
+## Provider/Slot 契约(daedalus-sdk#2 填实)+ 占位
 
-以下目录是 #42 Provider/Slot 抽象的**占位**(issue #46 C3 拍板):空目录 + README,
-仅声明 slot 名,不带 Go 代码、不暴露 import。等 #42 落地时填实 contract 与实现。
+`slot/` `secretprovider/` `memoryprovider/` 已按 sdk#2(原 Daedalusys/Daedalusys#42)
+填实**第一批 contract**:只有接口、形状门、值类型与哨兵错误,零实现零注册表
+(契约缝·零运行时);语义单一事实源见 [`docs/provider-slot.md`](docs/provider-slot.md)。
+
+| 包 | 指向的抽象 | 状态 |
+|----|-----------|------|
+| `slot/` | swappability Level 共享词汇(L0–L3) | contract 已钉 |
+| `secretprovider/` | #33 KWallet + #34 systemd-creds 抽象(引用不持明文,序列化恒脱敏) | contract 已钉 |
+| `memoryprovider/` | #29 持久记忆抽象(scope 封闭枚举,TTL,检索可缺席) | contract 已钉 |
+
+以下目录仍是**占位**(空目录 + README,仅声明 slot 名,不暴露 import;
+issue #46 C3 拍板,等各自议题落地再填实):
 
 | 占位目录 | 指向的抽象 |
 |----------|-----------|
-| `secretprovider/` | #33 KWallet + #34 systemd-creds 抽象 |
-| `memoryprovider/` | #29 持久记忆/知识图谱抽象 |
 | `modelprovider/` | #31 提示词缓存 / 模型 provider 抽象 |
 | `agentprovider/` | 未来 agent provider 抽象 |
 | `transportprovider/` | MCP stdio/HTTP/A2A 抽象 |
@@ -86,6 +95,13 @@ issue #46 决定走 SDK 路线 = 接受此 trade-off。安全边界从"编译器
 当前镜像内全部能力服务器(`daedalus-{fs,shell,pkg,sysinfo,service,blueprint}.service`)
 与宿主均满足上述清单;新增消费方(如未来 controller runtime)必须照抄
 `daedalus-*.service.d/` 模式,否则视为部署错误。
+
+**sdk#2 增量(`slot/` `secretprovider/` `memoryprovider/`)**。三个新包是
+**契约缝·零运行时**:只有类型、形状门、脱敏值类型与哨兵错误,无 I/O、无
+实现、无注册表,威胁面增量趋近于零;真正的强制在消费侧——`Secret` 的
+序列化拒绝把"明文不入审计/日志"从纪律变成类型层红线,provider 实现
+(KWallet/credstore/builtin memory)接线时其特权与凭证访问归 System
+Extension + systemd 沙箱管辖(双层 extension 模型见 docs/provider-slot.md §5)。
 
 ## 开发与测试
 
