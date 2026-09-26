@@ -1,4 +1,4 @@
-// pathguard 包的表驱动测试:逐条锁定 fs_server.ts 的路径校验语义。
+// pathguard 包的表驱动测试:逐条锁定路径校验语义(权威实现为本包)。
 package pathguard
 
 import (
@@ -21,7 +21,7 @@ func TestAllowedDirs(t *testing.T) {
 	}
 }
 
-// TestNormalizePath 对应 fs_server.ts 的词法规范化(dotdot 弹栈、
+// TestNormalizePath 覆盖词法规范化(dotdot 弹栈、
 // 空段与 '.' 丢弃;栈空时 pop 为 no-op,不会越过根)。
 func TestNormalizePath(t *testing.T) {
 	tests := []struct {

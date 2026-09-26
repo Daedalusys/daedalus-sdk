@@ -58,10 +58,9 @@ log_path = "/var/log/daedalus/audit.jsonl"
 enabled_kinds = ["service", "package"]
 
 [blueprints]
-# 蓝图(blueprint)渲染/校验/重载/密钥来源策略节(计划 daedalus-blueprint-p1
-# 决策 5 / todo 10,与 [shell]/[fs]/[audit]/[objectmodel] 并列的第五策略节):
-# 声明式列出蓝图渲染输出允许目录、post_check/pre_check 可执行命令白名单、
-# reload 允许触发的服务名与 secret 引用解析来源。
+# 蓝图(blueprint)渲染/校验/重载/密钥来源策略节(与 [shell]/[fs]/[audit]/
+# [objectmodel] 并列的第五策略节):声明式列出蓝图渲染输出允许目录、
+# post_check 可执行命令白名单、reload 允许触发的服务名与 secret 引用解析来源。
 # fail-closed:任一空列表视为损坏策略,Go 服务器启动时拒绝加载。
 # 本值与 internal/policy.Default() 由三点漂移测试(todo 9)钉死一致;
 # post_check 白名单的运行时消费方见 internal/shellpolicy 的
@@ -70,7 +69,7 @@ enabled_kinds = ["service", "package"]
 # 蓝图渲染输出的允许目录(前缀白名单,与 pathguard 联动)。
 output_dirs = ["/etc/nginx/conf.d", "/etc/haproxy", "/etc/postgresql", "/etc/redis"]
 
-# post_check / pre_check 可执行的命令白名单(严格子集,独立于 [shell].allowed_commands)。
+# post_check 可执行的命令白名单(严格子集,独立于 [shell].allowed_commands)。
 post_check_commands = ["nginx", "haproxy", "psql", "redis-cli", "systemctl", "grep"]
 
 # reload 允许触发的服务名(经 daedalus-tx 的 service.set 通道)。

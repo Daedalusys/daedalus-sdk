@@ -1,5 +1,5 @@
 // Package secretprovider 钉 SecretProvider slot 的第一批 contract
-// (daedalus-sdk#2,消费者议题 #33 KWallet / #34 systemd-creds)。
+// 消费者为 blueprint secret 源(KWallet / systemd-creds 接入项)。
 //
 // 职责边界(契约缝·零运行时,镜像 internal/controller 先例):
 //   - 本包只有接口、引用形状、脱敏值类型与哨兵错误,**没有任何实现**、
@@ -92,7 +92,7 @@ func (s Secret) Zeroize() {
 	}
 }
 
-// Provider 是 SecretProvider slot 的稳定 contract,方法与 #33 工具面
+// Provider 是 SecretProvider slot 的稳定 contract,方法与 secret 工具面
 // 一一对应(collections/list/get/set/delete)。实现者义务:
 //   - 错误必须经 %w 携带本包哨兵,且不得内嵌值内容;
 //   - 对非本 Scheme 的 Ref 一律 ErrSchemeMismatch(读写皆拒);
@@ -102,14 +102,14 @@ type Provider interface {
 	Scheme() string
 	// Swappability 声明替换上限;平台承诺永不超过它(见 slot.Level)。
 	Swappability() slot.Level
-	// Collections 列出可寻址容器(#33 secrets_collections)。
+	// Collections 列出可寻址容器(secrets_collections)。
 	Collections(ctx context.Context) ([]string, error)
-	// List 按容器 + 前缀列出引用(#33 secrets_list)。
+	// List 按容器 + 前缀列出引用(secrets_list)。
 	List(ctx context.Context, collection, prefix string) ([]Ref, error)
-	// Get 解析引用为明文(#33 secrets_get;明文仅在 L0 调用栈)。
+	// Get 解析引用为明文(secrets_get;明文仅在 L0 调用栈)。
 	Get(ctx context.Context, ref Ref) (Secret, error)
-	// Set 写入凭据(#33 secrets_set;确认令牌归工具面,不在此层)。
+	// Set 写入凭据(secrets_set;确认令牌归工具面,不在此层)。
 	Set(ctx context.Context, ref Ref, value Secret) error
-	// Delete 删除凭据(#33 secrets_delete)。
+	// Delete 删除凭据(secrets_delete)。
 	Delete(ctx context.Context, ref Ref) error
 }
