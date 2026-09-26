@@ -23,9 +23,12 @@ import (
 // 只影响异常挂死路径,不改变任何成功路径的行为。
 const execTimeout = 30 * time.Second
 
-// packagePattern 允许的软件包名称模式,防命令行参数注入,逐字移植
-// pkg_server.py 的同名正则(RE2 与 py 语义一致;两版都先 strip,尾随换行无差异)。
-var packagePattern = regexp.MustCompile(`^[a-zA-Z0-9_\-\.\*\+\:]+$`)
+// packagePattern 允许的软件包名称模式,防命令行参数注入。首字符类刻意排除
+// `-`:其余字符集中 `-` 合法(nss-pam-ldapd 等真名大量含中划线),但**前导**
+// `-` 会让 `rpm -q --info <name>` / `dnf repoquery` 把包名解析成选项旗标
+// (`--queryall`、`-qa` 之类),即 argv 注入——包名/glob 语法上不存在前导 `-`,
+// 在源头直接拒绝比 exec 处补 `--` 分隔符更强(fail-closed, 注入串根本不进 argv)。
+var packagePattern = regexp.MustCompile(`^[a-zA-Z0-9_*+:][a-zA-Z0-9_\-\.\*\+\:]*$`)
 
 // IsValidPackageName 报告 name 是否匹配 PACKAGE_PATTERN 白名单（防命令行参数注入）。
 // 这是 package_set.go 等跨包消费者的单一事实源：任何对包名做合法性校验的代码
@@ -101,7 +104,7 @@ func (s *Service) DnfQuery(ctx context.Context, name string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, execTimeout)
 	defer cancel()
 
-	stdout, _, code, execErr := s.exec(ctx, "rpm", []string{"-q", "--info", safeName})
+	stdout, _, code, execErr := s.exec(ctx, "rpm", []string{"-q", "--info", "--", safeName})
 	if execErr != nil {
 		return fmt.Sprintf("Error executing rpm query: %v", execErr), nil
 	}
@@ -110,7 +113,7 @@ func (s *Service) DnfQuery(ctx context.Context, name string) (string, error) {
 	}
 
 	var stderr string
-	stdout, stderr, code, execErr = s.exec(ctx, "dnf", []string{"repoquery", "--info", safeName})
+	stdout, stderr, code, execErr = s.exec(ctx, "dnf", []string{"repoquery", "--info", "--", safeName})
 	if execErr != nil {
 		return fmt.Sprintf("Error executing dnf repoquery: %v", execErr), nil
 	}
@@ -134,7 +137,7 @@ func (s *Service) DnfListInstalled(ctx context.Context, pattern string) ([]strin
 	ctx, cancel := context.WithTimeout(ctx, execTimeout)
 	defer cancel()
 
-	stdout, stderr, code, execErr := s.exec(ctx, "rpm", []string{"-qa", safePattern})
+	stdout, stderr, code, execErr := s.exec(ctx, "rpm", []string{"-qa", "--", safePattern})
 	if execErr != nil {
 		return []string{fmt.Sprintf("Error executing rpm -qa: %v", execErr)}, nil
 	}
