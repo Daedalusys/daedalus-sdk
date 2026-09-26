@@ -52,7 +52,7 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 |--------------------|----------|------|
 | `audit.Hashtx` / `audit.Append` | `audit/hashtx.go` | sha256 链 + syscall.Flock (LOCK_UN before Close via defer LIFO) |
 | `audit.Verify` / `audit.Scan` | `audit/verify.go` `audit/scan.go` | 哈希链验证 / 扫描 |
-| `policy.Load` / `policy.Default` | `policy/load.go` | 严格加载 / 缺失 fallback (drift-tested 一致) |
+| `policy.Load` / `policy.Default` | `policy/policy.go` | 严格加载 / 缺失默认 fail-closed 拒启(回退 Default 需 `DAEDALUS_POLICY_MODE=development` opt-in,drift-tested 一致) |
 | `shellpolicy.AllowCommands` | `shellpolicy/allow.go` | 15 命令权威实现;CLEAN_ENV + 30s + rc 126/124 |
 | `pathguard.Validate` | `pathguard/validate.go` | ALLOWED_DIRS 前缀 + realpath 防逃逸 |
 | `plugin.Manifest` / `plugin.Pack` | `plugin/manifest.go` `plugin/pack.go` | 规范化自摘要 + 逐条目 sha256 + zip-slip 防线 |

@@ -415,12 +415,12 @@ func TestResolvePath_CrossRepoLayout(t *testing.T) {
 	})
 }
 
-// TestLoadOrDefault_NotFoundFallsBackToDefault 锁定关键稳健性:
-// 三处候选全缺失 → Default() 兜底、零错误(服务器可启动);
-// 而 Load("") 同场景返回 ErrNotFound 供需要严格模式的调用方区分。
-func TestLoadOrDefault_NotFoundFallsBackToDefault(t *testing.T) {
+// TestLoadOrDefault_MissingFailClosed 锁定缺失语义:三处候选全缺失 →
+// 默认 fail-closed 报错(服务器拒绝启动);仅 DAEDALUS_POLICY_MODE=development
+// 显式 opt-in 才回退 Default();而 Load("") 同场景返回 ErrNotFound 哨兵。
+func TestLoadOrDefault_MissingFailClosed(t *testing.T) {
 	if _, err := os.Stat(policy.ProductionPath); err == nil {
-		t.Skipf("本机存在 %s,跳过缺失回退演练", policy.ProductionPath)
+		t.Skipf("本机存在 %s,跳过缺失演练", policy.ProductionPath)
 	}
 	t.Setenv(policy.EnvPolicyPath, "")
 	t.Chdir(t.TempDir()) // 空目录上溯不可能命中仓库回溯路径。
@@ -428,9 +428,13 @@ func TestLoadOrDefault_NotFoundFallsBackToDefault(t *testing.T) {
 	if _, err := policy.Load(""); !errors.Is(err, policy.ErrNotFound) {
 		t.Fatalf("Load 全缺失应返回 ErrNotFound, got %v", err)
 	}
+	if _, err := policy.LoadOrDefault(); !errors.Is(err, policy.ErrNotFound) {
+		t.Fatalf("缺省语义应 fail-closed(包装 ErrNotFound), got %v", err)
+	}
+	t.Setenv(policy.EnvPolicyMode, policy.PolicyModeDevelopment)
 	p, err := policy.LoadOrDefault()
 	if err != nil {
-		t.Fatalf("LoadOrDefault 应吞掉 ErrNotFound 并回退: %v", err)
+		t.Fatalf("development opt-in 应回退 Default: %v", err)
 	}
 	assertPolicyEqual(t, p, policy.Default(), "LoadOrDefault vs Default()")
 }
