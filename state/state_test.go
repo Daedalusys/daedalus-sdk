@@ -1,5 +1,5 @@
 // state 包测试:全部经 t.Setenv(DAEDALUS_STATE_PATH, 临时目录) 隔离,
-// 绝不触碰真实 /var/lib/daedalus(round-3 fold 新检出安全纪律)。
+// 绝不触碰真实 /var/lib/daedalus。
 // 唯一例外是兜底测试:它验证的正是 dirs 解析链在 env/系统候选均不可写时
 // 落 $HOME 的行为,夹具带 root DAC 绕过 skip 守卫。
 package state

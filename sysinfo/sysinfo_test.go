@@ -53,7 +53,7 @@ func (f *fakeExec) wantCommands(t *testing.T, want ...[]string) {
 	}
 }
 
-// —— os_release(py:21-55)——
+// —— os_release ——
 
 func TestOSRelease_ParsesQuotesCommentsAndSkipsMalformed(t *testing.T) {
 	svc := NewService(nil, testRoot(t, "root"), nil)
@@ -65,7 +65,7 @@ func TestOSRelease_ParsesQuotesCommentsAndSkipsMalformed(t *testing.T) {
 		"ID":             "daedalus",     // 无引号原样
 		"ID_LIKE":        "almalinux fedora",
 		"VERSION_ID":     "42",
-		"BUILD_ID":       "single-quoted", // 单引号去除(py:50)
+		"BUILD_ID":       "single-quoted", // 单引号去除
 		"PRETTY_NAME":    "Daedalus OS 0.1.0",
 		"NOQUOTE":        "simple",
 		"EMPTY":          "",
@@ -77,7 +77,7 @@ func TestOSRelease_ParsesQuotesCommentsAndSkipsMalformed(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, got[k], want)
 		}
 	}
-	// 注释行与无 '=' 行必须被跳过(py:45)。
+	// 注释行与无 '=' 行必须被跳过。
 	if _, ok := got["#"]; ok {
 		t.Error("注释行未被跳过")
 	}
@@ -94,7 +94,7 @@ func TestOSRelease_ParsesQuotesCommentsAndSkipsMalformed(t *testing.T) {
 func TestOSRelease_NoTargetReturnsErrorKey(t *testing.T) {
 	svc := NewService(nil, testRoot(t, "emptyroot"), nil)
 	got := svc.OSRelease()
-	// py:38 错误串逐字。
+	// 错误串与 py 版逐字一致。
 	if want := "Neither /etc/os-release nor /usr/lib/os-release found"; got["error"] != want {
 		t.Errorf("error = %v, want %q", got["error"], want)
 	}
@@ -129,7 +129,7 @@ func writeFile(dir, name, content string) error {
 	return os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644)
 }
 
-// —— hardware_info(py:58-129)——
+// —— hardware_info ——
 
 func TestHardwareInfo_CpuMemoryDiskFromInjectedFixtures(t *testing.T) {
 	fakeDisk := func(path string) (DiskUsage, error) {
@@ -158,7 +158,7 @@ func TestHardwareInfo_CpuMemoryDiskFromInjectedFixtures(t *testing.T) {
 	if !ok {
 		t.Fatalf("memory 结构异常: %T", got["memory"])
 	}
-	// py:106 白名单五键,Buffers/SwapCached/Dirty/HugePages_Total 必须被过滤。
+	// 白名单五键,Buffers/SwapCached/Dirty/HugePages_Total 必须被过滤。
 	wantKeys := []string{"MemAvailable", "MemFree", "MemTotal", "SwapFree", "SwapTotal"}
 	keys := make([]string, 0, len(mem))
 	for k := range mem {
@@ -190,7 +190,7 @@ func TestHardwareInfo_MissingProcFilesYieldErrorKeys(t *testing.T) {
 	got := svc.HardwareInfo()
 	cpu := got["cpu"].(map[string]any)
 	mem := got["memory"].(map[string]any)
-	// py:94、py:112 文案逐字。
+	// 错误文案与 py 版逐字一致。
 	if cpu["error"] != "/proc/cpuinfo not available" {
 		t.Errorf("cpu.error = %v", cpu["error"])
 	}
@@ -200,7 +200,7 @@ func TestHardwareInfo_MissingProcFilesYieldErrorKeys(t *testing.T) {
 }
 
 func TestHardwareInfo_DiskErrorIsolated(t *testing.T) {
-	// 磁盘失败只污染 disk 子字典,cpu/memory 照常(py:126-127 的局部 except)。
+	// 磁盘失败只污染 disk 子字典,cpu/memory 照常(对齐 py 的局部 except)。
 	svc := NewService(nil, testRoot(t, "root"), func(string) (DiskUsage, error) {
 		return DiskUsage{}, errors.New("statfs /: no such file or directory")
 	})
@@ -240,7 +240,7 @@ func okDisk(total, used, free int64) DiskUsageFunc {
 	}
 }
 
-// —— network_status(py:132-196)——
+// —— network_status ——
 
 func TestNetworkStatus_JsonLevelHit(t *testing.T) {
 	fe := &fakeExec{steps: []fakeStep{{stdout: `[{"ifname":"lo","addr_info":[]}]`, code: 0}}}
@@ -261,7 +261,7 @@ func TestNetworkStatus_JsonLevelHit(t *testing.T) {
 
 func TestNetworkStatus_JsonDecodeFailFallsToRawText(t *testing.T) {
 	fe := &fakeExec{steps: []fakeStep{
-		{stdout: "not json at all", code: 0}, // py:154 JSONDecodeError → pass
+		{stdout: "not json at all", code: 0}, // JSONDecodeError → pass
 		{stdout: "1: lo: <LOOPBACK>\n", code: 0},
 	}}
 	svc := NewService(fe.run, testRoot(t, "emptyroot"), nil)
@@ -279,7 +279,7 @@ func TestNetworkStatus_JsonDecodeFailFallsToRawText(t *testing.T) {
 }
 
 func TestNetworkStatus_SpawnErrorFallsThroughAllLevels(t *testing.T) {
-	// 一级"命令不存在"异常(py:156 except pass)→ 二级同样异常 → 三级 /proc/net/dev。
+	// 一级"命令不存在"异常(except pass)→ 二级同样异常 → 三级 /proc/net/dev。
 	fe := &fakeExec{steps: []fakeStep{{err: errors.New(`exec: "ip": executable file not found in $PATH`)}}}
 	svc := NewService(fe.run, testRoot(t, "root"), nil)
 	got := svc.NetworkStatus(context.Background())
@@ -291,7 +291,7 @@ func TestNetworkStatus_SpawnErrorFallsThroughAllLevels(t *testing.T) {
 		[]string{"ip", "-j", "addr", "show"},
 		[]string{"ip", "addr", "show"},
 	)
-	// py:184-191 列位:rx=stats[0], tx=stats[8];veth-short 列数不足 tx 兜底 0。
+	// 列位:rx=stats[0], tx=stats[8];veth-short 列数不足 tx 兜底 0。
 	ifaces := got["interfaces"].(map[string]any)
 	lo := ifaces["lo"].(map[string]any)
 	if lo["rx_bytes"] != int64(11111) || lo["tx_bytes"] != int64(22222) {
@@ -323,7 +323,7 @@ func TestNetworkStatus_AllLevelsFailYieldsSentinelError(t *testing.T) {
 	fe := &fakeExec{steps: []fakeStep{{code: 127, stderr: "command not found"}}}
 	svc := NewService(fe.run, testRoot(t, "emptyroot"), nil)
 	got := svc.NetworkStatus(context.Background())
-	// py:196 兜底错误串逐字。
+	// 兜底错误串与 py 版逐字一致。
 	if want := "Unable to determine network status"; got["error"] != want {
 		t.Errorf("error = %v, want %q", got["error"], want)
 	}
@@ -341,7 +341,7 @@ func TestNetworkStatus_BadIntInNetDevYieldsPrefixedError(t *testing.T) {
 	fe := &fakeExec{steps: []fakeStep{{err: execNotFound}}}
 	svc := NewService(fe.run, root, nil)
 	got := svc.NetworkStatus(context.Background())
-	// py:193-194 —— f"Failed reading /proc/net/dev: {e}" 的 Go 等价外壳。
+	// —— f"Failed reading /proc/net/dev: {e}" 的 Go 等价外壳。
 	msg, _ := got["error"].(string)
 	if !strings.HasPrefix(msg, "Failed reading /proc/net/dev: ") {
 		t.Errorf("坏整数 error = %q, want 前缀 %q", msg, "Failed reading /proc/net/dev: ")

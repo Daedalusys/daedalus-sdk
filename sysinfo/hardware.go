@@ -1,4 +1,4 @@
-// hardware.go 移植 sysinfo_server.py:58-129 的 hardware_info
+// hardware.go 移植 sysinfo_server.py 的 hardware_info
 // (CPU / 内存 / 磁盘三个部分的读取与聚合)。
 package sysinfo
 
@@ -11,18 +11,17 @@ import (
 
 // DiskUsage 是单个文件系统挂载点的用量(字节),对应 shutil.disk_usage 的三元组。
 type DiskUsage struct {
-	Total int64 // 总容量 = blocks * frsize
-	Used  int64 // 已用 = (blocks - bfree) * frsize
-	Free  int64 // 可用 = bavail * frsize(非特权用户实际可得)
+	Total int64
+	Used  int64
+	Free  int64 // bavail * frsize:非特权用户实际可得
 }
 
 // DiskUsageFunc 是磁盘用量的注入签名(生产实现见 StatfsDiskUsage)。
 type DiskUsageFunc func(path string) (DiskUsage, error)
 
 // StatfsDiskUsage 用 stdlib syscall.Statfs 复刻 shutil.disk_usage:
-// Python os.statvfs 的 f_frsize/f_blocks/f_bfree/f_bavail 与
-// Statfs_t 的 Frsize/Blocks/Bfree/Bavail 一一对应(Go 无 os.statvfs,
-// 这是零新增依赖的等价实现)。
+// os.statvfs 的 f_frsize/f_blocks/f_bfree/f_bavail ↔ Statfs_t 的
+// Frsize/Blocks/Bfree/Bavail(Go 无 os.statvfs,零新增依赖的等价实现)。
 func StatfsDiskUsage(path string) (DiskUsage, error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
@@ -35,30 +34,27 @@ func StatfsDiskUsage(path string) (DiskUsage, error) {
 	return DiskUsage{Total: total, Used: used, Free: free}, nil
 }
 
-// HardwareInfo 移植 sysinfo_server.py:58-129 的 hardware_info:
+// HardwareInfo 移植 sysinfo_server.py 的 hardware_info:
 // 返回 {"cpu": ..., "memory": ..., "disk": ...} 三层结构,
 // 各部分缺失/出错时以 {"error": ...} 子字典替代(键名与文案逐字对齐 py;
 // 读取异常的消息正文为 OS 原生文本,即 py str(e) 的 Go 等价)。
 func (s *Service) HardwareInfo() map[string]any {
-	// py:68-72 初始骨架:三部分都是空字典。
 	result := map[string]any{
 		"cpu":    map[string]any{},
 		"memory": map[string]any{},
 		"disk":   map[string]any{},
 	}
 
-	// —— 1. 从 /proc/cpuinfo 获取 CPU 信息(py:74-94)——
 	if cpuPath := s.path("/proc/cpuinfo"); isRegularFile(cpuPath) {
 		raw, err := os.ReadFile(cpuPath)
 		if err != nil {
-			result["cpu"] = map[string]any{"error": err.Error()} // py:91-92
+			result["cpu"] = map[string]any{"error": err.Error()}
 		} else {
 			model := ""
 			haveModel := false // 对应 py 的 "model_name is None" 判定
 			cores := 0
 			for _, line := range splitLines(string(raw)) {
-				// py:81-86 —— "processor" 前缀计核数;首个含 ":" 的
-				// "model name" 行取值,后续行不再覆盖。
+				// "processor" 前缀计核数;首个含 ":" 的"model name"行取值,后续行不覆盖。
 				if strings.HasPrefix(line, "processor") {
 					cores++
 				} else if !haveModel && strings.HasPrefix(line, "model name") {
@@ -68,30 +64,28 @@ func (s *Service) HardwareInfo() map[string]any {
 					}
 				}
 			}
-			// py:88 —— model_name or "Unknown":空串与 None 一样落 "Unknown"。
+			// model_name or "Unknown":空串与 None 一样落 "Unknown"。
 			if model == "" {
 				model = "Unknown"
 			}
 			result["cpu"] = map[string]any{"model": model, "cores": cores}
 		}
 	} else {
-		result["cpu"] = map[string]any{"error": "/proc/cpuinfo not available"} // py:94
+		result["cpu"] = map[string]any{"error": "/proc/cpuinfo not available"}
 	}
 
-	// —— 2. 从 /proc/meminfo 获取内存信息(py:96-112)——
 	if memPath := s.path("/proc/meminfo"); isRegularFile(memPath) {
 		raw, err := os.ReadFile(memPath)
 		if err != nil {
-			result["memory"] = map[string]any{"error": err.Error()} // py:109-110
+			result["memory"] = map[string]any{"error": err.Error()}
 		} else {
 			mem := map[string]any{}
 			for _, line := range splitLines(string(raw)) {
 				key, val, ok := strings.Cut(line, ":")
 				if !ok {
-					continue // py:102-103 —— len(parts) != 2 的行跳过
+					continue
 				}
 				key, val = pyStrip(key), pyStrip(val)
-				// py:106 —— 白名单五键,其余全部过滤。
 				switch key {
 				case "MemTotal", "MemFree", "MemAvailable", "SwapTotal", "SwapFree":
 					mem[key] = val
@@ -100,13 +94,12 @@ func (s *Service) HardwareInfo() map[string]any {
 			result["memory"] = mem
 		}
 	} else {
-		result["memory"] = map[string]any{"error": "/proc/meminfo not available"} // py:112
+		result["memory"] = map[string]any{"error": "/proc/meminfo not available"}
 	}
 
-	// —— 3. "/" 的磁盘使用情况(py:114-127)——
 	usage, err := s.disk("/")
 	if err != nil {
-		result["disk"] = map[string]any{"error": err.Error()} // py:126-127
+		result["disk"] = map[string]any{"error": err.Error()}
 		return result
 	}
 	const gib = 1024.0 * 1024.0 * 1024.0

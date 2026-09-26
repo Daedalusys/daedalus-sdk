@@ -1,4 +1,4 @@
-// pathguard 包的表驱动测试:逐条钉死 fs_server.ts:36-110 的路径校验语义。
+// pathguard 包的表驱动测试:逐条锁定 fs_server.ts 的路径校验语义。
 package pathguard
 
 import (
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestAllowedDirs 钉死白名单常量内容与顺序(任何漂移都必须先改此测试)。
+// TestAllowedDirs 锁定白名单常量内容与顺序(任何漂移都必须先改此测试)。
 func TestAllowedDirs(t *testing.T) {
 	want := []string{"/home", "/var/log", "/tmp"}
 	if len(AllowedDirs) != len(want) {
@@ -21,7 +21,7 @@ func TestAllowedDirs(t *testing.T) {
 	}
 }
 
-// TestNormalizePath 对应 fs_server.ts:96-110 的词法规范化(dotdot 弹栈、
+// TestNormalizePath 对应 fs_server.ts 的词法规范化(dotdot 弹栈、
 // 空段与 '.' 丢弃;栈空时 pop 为 no-op,不会越过根)。
 func TestNormalizePath(t *testing.T) {
 	tests := []struct {
@@ -171,7 +171,7 @@ func TestValidatePath_MissingNestedWrite(t *testing.T) {
 	}
 }
 
-// requireRealPath 钉死本机 realpath 事实,不满足时跳过(而非误报失败)。
+// requireRealPath 锁定本机 realpath 事实,不满足时跳过(而非误报失败)。
 func requireRealPath(t *testing.T, p, want string) {
 	t.Helper()
 	r, err := filepath.EvalSymlinks(p)

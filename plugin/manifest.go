@@ -1,16 +1,13 @@
 // Package plugin 定义 daedalus-plugin 插件格式:manifest schema、zip 打包器与校验器。
 //
-// 本包实现计划 todo 6 的插件容器格式(类比 VSIX 的 extension.vsixmanifest):
-//   - manifest.go  : daedalus.plugin.json 的结构体与逐条字段校验;
-//   - pack.go      : 目录 → zip 包,自动注入逐条目 sha256 checksums;
-//   - verify.go    : 带 zip-slip 防护的解压 + manifest/checksum/可执行位校验。
+// 本包实现插件容器格式(类比 VSIX 的 extension.vsixmanifest),分三个文件:
+// manifest(schema 与逐条字段校验)、pack(目录 → zip、注入逐条目 sha256)、
+// verify(zip-slip 防护解压 + manifest/checksum/可执行位校验)。
 //
-// 设计边界(决策 21/22、Metis M2/M5):
+// 设计边界:
 //   - permissions 是"请求能力"的声明式字段,校验器只检查其 JSON 形态,
 //     不与 policy.toml 的强制执行值比对;
-//   - resources(Object Model 资源声明)的 schema 单一事实源在
-//     daedalus/core/internal/objectmodel/objectmodel.go(计划
-//     .omo/plans/aios-object-model-alignment.md 的 Object Model 段与决策 25),
+//   - resources(Object Model 资源声明)的 schema 单一事实源在 objectmodel 包,
 //     本包只逐条目委托校验,不复制形态规则;
 //   - 完整性仅 sha256,不做签名;不做运行时联网安装。
 package plugin
@@ -29,26 +26,24 @@ import (
 // ManifestFileName 是插件清单在包根目录的固定文件名。
 const ManifestFileName = "daedalus.plugin.json"
 
-// type/runtime 的合法枚举值(计划草案决策 10/21)。
 const (
-	TypeCopilot    = "copilot"    // Copilot CLI 插件
-	TypeCapability = "capability" // OS 能力服务器插件
-	TypeController = "controller" // 声明性预留 v1.5：校验放行即全部语义，runtime 无分支（惰性=宿主 type-agnostic，见 internal/controller/doc.go）
+	TypeCopilot    = "copilot"
+	TypeCapability = "capability"
+	TypeController = "controller" // 声明性预留:校验放行即全部语义,runtime 无分支(宿主 type-agnostic)
 )
 
 // Runtime 枚举值:以 Runtime 值声明,宿主 switch 可直接与 m.Runtime 比较。
 var (
 	RuntimeNative     = Runtime{Name: "native"}     // Go 静态二进制,直接 exec
 	RuntimeDeno       = Runtime{Name: "deno"}       // Deno 脚本,entrypoint 给出 deno run 参数
-	RuntimeController = Runtime{Name: "controller"} // 声明性预留:与 TypeController 配套
+	RuntimeController = Runtime{Name: "controller"} // 与 TypeController 配套
 )
 
 // idPattern 是插件 id 的文法:小写字母/数字段,以单个 '.' 分层。
 var idPattern = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9]+)*$`)
 
-// ValidID 报告 s 是否为合法插件 id(文法与 Manifest.Validate 的 id 规则同源)。
-// 宿主 daedalus-host 用它把关 CLI 传入的 <id>,拒绝 '../' 等路径注入,
-// 避免文法在两个包里各写一份而漂移。
+// ValidID 报告 s 是否为合法插件 id(文法与 Manifest.Validate 的 id 规则
+// 同源,避免两处各写一份而漂移),宿主用它拒绝 '../' 等路径注入。
 func ValidID(s string) bool { return idPattern.MatchString(s) }
 
 // semverPattern 是语义化版本 2.0.0 的完整文法(major.minor.patch[-prerelease][+build])。
@@ -84,7 +79,6 @@ type Runtime struct {
 }
 
 // String 返回可读形式:仅 Name,或 "Name Version"(Version 非空时)。
-// 宿主/打包器的 %s 打印自动经此方法,无需逐处改调用点。
 func (r Runtime) String() string {
 	if r.Version == "" {
 		return r.Name
@@ -104,7 +98,7 @@ type Manifest struct {
 	Entrypoint  []string                `json:"entrypoint,omitempty"`
 	Permissions *Permissions            `json:"permissions,omitempty"`
 	Tools       []string                `json:"tools,omitempty"`
-	Resources   []*objectmodel.Resource `json:"resources,omitempty"` // 条目 schema 单一事实源见 daedalus/core/internal/objectmodel/objectmodel.go
+	Resources   []*objectmodel.Resource `json:"resources,omitempty"` // 条目 schema 单一事实源见 objectmodel 包
 	I18N        []string                `json:"i18n,omitempty"`
 	Checksums   map[string]string       `json:"checksums,omitempty"`
 	APIVersion  string                  `json:"api_version"` // 插件格式 schema 版本(semver,必填)
@@ -112,12 +106,10 @@ type Manifest struct {
 	Maintainer  string                  `json:"maintainer"`  // 维护者邮箱(必填)
 }
 
-// UnmarshalJSON 兼容 runtime 字段的两种形态:
-//   - 老形态(字符串):"runtime": "deno" → Runtime{Name: "deno"};
-//   - 新形态(对象):"runtime": {"name": "deno", "version": "2.1.4"}。
-//
-// 其余字段与 ParseManifest 的 DisallowUnknownFields 语义一致(未知键拒绝),
-// 因为类型实现 json.Unmarshaler 后外层 Decoder 不再做字段匹配,必须在此自守。
+// UnmarshalJSON 兼容 runtime 字段两种形态:字符串 "deno" → Runtime{Name},
+// 对象 {"name","version"} → 完整 Runtime。其余字段与 ParseManifest 的
+// DisallowUnknownFields 语义一致——实现 json.Unmarshaler 后外层 Decoder
+// 不再做字段匹配,必须在此自守未知键拒绝。
 func (m *Manifest) UnmarshalJSON(data []byte) error {
 	type manifestAlias struct {
 		ID          string                  `json:"id"`
@@ -151,7 +143,6 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 	if len(a.Runtime) == 0 {
 		return nil
 	}
-	// 老形态:字符串 "deno" → Runtime{Name: "deno"}
 	if a.Runtime[0] == '"' {
 		var name string
 		if err := json.Unmarshal(a.Runtime, &name); err != nil {
@@ -160,7 +151,6 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 		m.Runtime = Runtime{Name: name}
 		return nil
 	}
-	// 新形态:对象 {"name": ..., "version": ...}
 	var rt Runtime
 	if err := json.Unmarshal(a.Runtime, &rt); err != nil {
 		return err
@@ -169,9 +159,8 @@ func (m *Manifest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ParseManifest 从 JSON 字节解析 manifest。除标准语法检查外,
-// 拒绝未知字段(拼写错误的键必须报错,不能静默丢弃)、
-// 拒绝 JSON 尾部垃圾,并要求顶层为对象。
+// ParseManifest 从 JSON 字节解析 manifest:拒绝未知字段(拼写错误的键
+// 必须报错,不能静默丢弃)、拒绝 JSON 尾部垃圾,要求顶层为对象。
 func ParseManifest(data []byte) (*Manifest, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -198,23 +187,10 @@ func LoadManifestFile(path string) (*Manifest, error) {
 	return m, nil
 }
 
-// Validate 逐条执行计划规定的校验规则;所有错误消息含字段名与原因。
-//
-// 规则清单:
-//  1. id 必填且匹配 ^[a-z0-9]+(\.[a-z0-9]+)*$;
-//  2. name 必填;
-//  3. version 必填且为合法语义化版本;
-//  4. type ∈ {copilot, capability, controller};
-//  5. runtime.name ∈ {native, deno, controller};
-//  6. api_version 必填且为语义化版本(major.minor.patch);
-//  7. license 必填且为 SPDX 标识格式;
-//  8. maintainer 必填且为邮箱格式;
-//  9. executable 必填、相对路径、不得含 '..'/空字节/绝对路径/以 '/' 开头;
-//  10. entrypoint 元素非空且不含空字节;
-//  11. tools 元素为非空字符串;
-//  12. resources(若存在)逐条目经 objectmodel.ValidateResource 校验
-//      (schema 见 daedalus/core/internal/objectmodel/objectmodel.go);
-//  13. checksums(若存在)键为安全相对路径、值为 "sha256:<64hex>"。
+// Validate 逐条执行校验规则,任一不满足即拒绝(fail-closed),所有错误消息
+// 含字段名与原因。覆盖:必填字段格式、executable/checksums 键的相对路径约束、
+// entrypoint/tools 非空元素、resources 逐条目委托 objectmodel.ValidateResource、
+// checksums 值为 "sha256:<64hex>"。
 func (m *Manifest) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("字段 id 缺失:必填,如 \"daedalus.copilot\"")
@@ -271,11 +247,8 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("字段 tools[%d] 非法:工具名必须是非空字符串", i)
 		}
 	}
-	// resources 逐条目委托 objectmodel.ValidateResource 校验(形态规则归
-	// 资源模式层,单一事实源:daedalus/core/internal/objectmodel/objectmodel.go,
-	// 计划 .omo/plans/aios-object-model-alignment.md 决策 25);错误消息统一带
-	// resources[i] 字段路径,与 tools 同风格。
-	// 字段缺席/为空数组时零迭代,旧清单行为完全不变(向后兼容)。
+	// 形态规则归 objectmodel 包(单一事实源);错误消息统一带 resources[i]
+	// 字段路径。字段缺席或为空数组时零迭代,旧清单行为不变。
 	for i, res := range m.Resources {
 		if err := objectmodel.ValidateResource(res); err != nil {
 			return fmt.Errorf("字段 resources[%d] 非法:%w", i, err)

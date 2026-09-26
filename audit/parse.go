@@ -8,7 +8,7 @@ import (
 
 // ErrInvalidJSON 是解析失败的哨兵错误。
 //
-// CLI 语义与 audit-log.py:169-172 一致: --args 解析失败时按原始字符串处理,
+// CLI 语义与 audit-log.py 一致: --args 解析失败时按原始字符串处理,
 // 因此调用方用 errors.Is(err, ErrInvalidJSON) 判别, 而不是依赖错误文案。
 var ErrInvalidJSON = errors.New("audit: 非法 JSON")
 
@@ -52,8 +52,7 @@ func (p *parser) errorf(format string, args ...any) error {
 	}
 }
 
-// parseError 携带位置信息, 通过 Unwrap 挂到 ErrInvalidJSON 哨兵上,
-// 调用方用 errors.Is(err, ErrInvalidJSON) 判别原始字符串回退路径。
+// parseError 携带位置信息, 通过 Unwrap 挂到 ErrInvalidJSON 哨兵上。
 type parseError struct{ msg string }
 
 func (e *parseError) Error() string { return e.msg }
@@ -110,7 +109,7 @@ func (p *parser) parseLiteral(lit string, v *Value) (*Value, error) {
 }
 
 func (p *parser) parseObject(depth int) (*Value, error) {
-	p.pos++ // '{'
+	p.pos++
 	obj := NewObject()
 	p.skipSpace()
 	if p.pos < len(p.src) && p.src[p.pos] == '}' {
@@ -153,7 +152,7 @@ func (p *parser) parseObject(depth int) (*Value, error) {
 }
 
 func (p *parser) parseArray(depth int) (*Value, error) {
-	p.pos++ // '['
+	p.pos++
 	arr := &Value{kind: kindArray}
 	p.skipSpace()
 	if p.pos < len(p.src) && p.src[p.pos] == ']' {

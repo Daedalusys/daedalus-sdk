@@ -7,7 +7,10 @@
 # 注意:testdata drift 守门(生产 policy.toml ↔ SDK testdata 副本)不放本仓——
 # SDK 仓独立 CI 没有 daedalus-core 兄弟仓,diff 无法跑;该守门放 core 仓
 # build.yml(core 仓有 SDK 兄弟 checkout + 生产 policy.toml,review Oracle
-# Issue 3 修正)。
+# Issue 3 修正)。同理 plugin 包的 TestValidate_OfficialPluginManifests 要读
+# ../../daedalus-plugins 与 ../../daedalus-core,而 Actions 不许 checkout 逃出
+# GITHUB_WORKSPACE → 本仓 CI 里它显式 skip,真实执行点是 core 仓 build.yml 的
+# "Official manifest cross-repo gate"(那里三仓平级检出)。
 name: SDK Test
 on:
   pull_request:

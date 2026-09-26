@@ -1,12 +1,7 @@
 // Package sysinfo 是系统信息只读查询逻辑的 Go 移植,规格源为
 // daedalus/files/system/opt/daedalus/servers/sysinfo_server.py(Python 参考实现)。
-//
-// 行为逐条对齐 py 版:
-//   - os_release:候选 /etc/os-release → /usr/lib/os-release,
-//     解析 key=value、去引号、跳过注释与空行(py:21-55);
-//   - hardware_info:cpu model/cores、内存白名单、"/" 磁盘用量含 *_gb round2(py:58-129);
-//   - network_status:`ip -j addr show` JSON → `ip addr show` 原文 →
-//     /proc/net/dev 三级回退(py:132-196)。
+// os_release / hardware_info / network_status 三条查询的解析、回退与错误文案
+// 逐条对齐 py 版(细节见各函数文档)。
 //
 // 可测性:外部命令经 ExecRunner 注入;文件读取根目录经 root 字段重定向
 // (生产为 "/");磁盘用量经 DiskUsageFunc 注入,使全部逻辑在无 rpm/dnf/ip
@@ -25,9 +20,8 @@ import (
 	"time"
 )
 
-// execTimeout 是 Go 侧新增的防御性超时(py 版无对应逻辑)。
-// Python 的子进程调用对挂死的 `ip` 会无限等待,Go 版统一以 30 秒上限
-// 防止单个工具调用永久占用服务器;只影响异常挂死路径,不改变成功路径行为。
+// execTimeout 是 Go 侧新增的防御性超时(py 版对挂死进程会无限等待):
+// 只影响异常挂死路径,不改变成功路径行为。
 const execTimeout = 30 * time.Second
 
 // ExecRunner 是外部命令执行器的注入签名:按 argv 直接执行 name + args
@@ -36,7 +30,6 @@ const execTimeout = 30 * time.Second
 // 此时 code 无意义;进程正常退出(含非零码)时 err 为 nil、code 为退出码。
 type ExecRunner func(ctx context.Context, name string, args []string) (stdout, stderr string, code int, err error)
 
-// ExecCommand 是 ExecRunner 的默认实现(os/exec,argv 直发,无 shell 包装)。
 func ExecCommand(ctx context.Context, name string, args []string) (string, string, int, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -54,15 +47,13 @@ func ExecCommand(ctx context.Context, name string, args []string) (string, strin
 	return stdout.String(), stderr.String(), -1, err
 }
 
-// Service 封装可注入的系统信息查询逻辑。
 type Service struct {
 	exec ExecRunner // 命令执行器(network_status 使用)
 	root string     // 文件读取根目录:生产为 "/",测试重定向到 testdata
 	disk DiskUsageFunc
 }
 
-// NewService 构造系统信息服务。exec 为 nil 时使用默认 os/exec 实现;
-// root 为空时使用 "/";disk 为 nil 时使用基于 statfs 的真实磁盘统计。
+// NewService 构造系统信息服务;exec/root/disk 为零值时使用默认实现。
 func NewService(exec ExecRunner, root string, disk DiskUsageFunc) *Service {
 	if exec == nil {
 		exec = ExecCommand
@@ -108,11 +99,10 @@ func splitLines(data string) []string {
 	return lines
 }
 
-// OSRelease 移植 sysinfo_server.py:21-55 的 os_release:
+// OSRelease 移植 sysinfo_server.py 的 os_release:
 // 按候选顺序取第一个存在的文件,逐行解析 key=value(去引号、跳注释/空行/无 '=' 行);
-// 文件缺失或读取失败时返回 {"error": ...} 字典(键与文案逐字对齐 py:38、py:55)。
+// 文件缺失或读取失败时返回 {"error": ...} 字典(键与文案与 py 版逐字对齐)。
 func (s *Service) OSRelease() map[string]any {
-	// py:30-38 候选顺序与未命中错误串。
 	candidates := []string{"/etc/os-release", "/usr/lib/os-release"}
 	targetFile := ""
 	for _, p := range candidates {
@@ -128,19 +118,18 @@ func (s *Service) OSRelease() map[string]any {
 	data := map[string]any{}
 	raw, err := os.ReadFile(targetFile)
 	if err != nil {
-		// py:54-55 —— 读取异常的 Go 等价错误串(python 为 OSError 消息,
+		// 读取异常的 Go 等价错误串(python 为 OSError 消息,
 		// 消息正文为 OS 原生,格式外壳逐字一致)。
 		return map[string]any{"error": fmt.Sprintf("Failed to read os-release: %v", err)}
 	}
 	for _, line := range splitLines(string(raw)) {
 		line = pyStrip(line)
-		// py:45 —— 空行、注释行、不含 '=' 的行一律跳过。
 		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
 			continue
 		}
-		k, v, _ := strings.Cut(line, "=") // py:47 split("=", 1)
+		k, v, _ := strings.Cut(line, "=") // split("=", 1)
 		k, v = pyStrip(k), pyStrip(v)
-		// py:50-51 —— 成对双引号或单引号则去掉首尾各一字符;
+		// 成对双引号或单引号则去掉首尾各一字符;
 		// Python 切片对长度为 1 的引号串取 [1:-1] 得空串,Go 显式复刻。
 		if len(v) >= 2 && ((v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'')) {
 			v = v[1 : len(v)-1]

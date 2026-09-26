@@ -1,15 +1,12 @@
-// verify.go: daedalus-plugin 包校验器。
-//
-// 校验链(任一环节失败即整体拒绝;Verify 面向 zip 包,VerifyDir 面向已安装目录,
-// 两者共用第 2-5 步同一核心):
-//  1. (zip 路径) 通过 ExtractZip 把包安全解压到 destDir(zip-slip/符号链接/zip bomb 防线);
-//     (目录路径) 通过 collectEntries 安全收集已落盘文件(拒绝符号链接/特殊文件);
+// verify.go: daedalus-plugin 包校验器。校验链任一环节失败即整体拒绝:
+// Verify 面向 zip 包、VerifyDir 面向已安装目录,共用第 2-5 步同一核心。
+//  1. (zip) ExtractZip 安全解压 / (目录) collectEntries 安全收集,拒绝
+//     zip-slip、符号链接、zip bomb、特殊文件与路径逃逸;
 //  2. 解析并逐条校验根目录的 daedalus.plugin.json;
-//  3. checksums 必须存在,且其键集合与实际文件条目集合完全相等
-//     (既不允许"有文件无摘要",也不允许"有摘要无文件");
-//  4. 每个文件条目的实际 sha256 必须与 checksums 一致;
-//     manifest 自身按"剔除 checksums 的规范化 JSON"摘要比对;
-//  5. executable 必须已落盘且带可执行位。
+//  3. checksums 存在,且键集合与实际条目集合双向相等;
+//  4. 逐条目 sha256 与 checksums 一致,manifest 按剔除 checksums 的规范化
+//     JSON 自摘要比对;
+//  5. executable 已落盘且带可执行位。
 package plugin
 
 import (
@@ -31,14 +28,11 @@ func Verify(zipPath, destDir string) (*Manifest, error) {
 	return verifyExtracted(destDir, entries)
 }
 
-// VerifyDir 校验已安装(解压落盘)的插件目录:对目录内全部文件重算
-// sha256 并与 manifest 的 checksums 比对。它与 Verify 共用第 2-5 步校验核心
-// (manifest 解析/逐条校验、checksums 双向集合相等、逐条目摘要与 manifest 自摘要
-// 比对、executable 落盘且可执行),宿主 daedalus-host 的 verify/list 依赖本函数,
-// 严禁在宿主侧重复实现摘要比对逻辑(计划 todo 7 MUST DO)。
-//
-// 目录遍历复用打包器的安全收集规则:符号链接、非普通文件、含 '..'/绝对形态的
-// 路径名一律拒绝(已安装目录同样不容许逃逸通道)。
+// VerifyDir 校验已安装(解压落盘)的插件目录:对目录内全部文件重算 sha256
+// 并与 manifest 的 checksums 比对,与 Verify 共用第 2-5 步校验核心。宿主
+// daedalus-host 的 verify/list 依赖本函数,严禁在宿主侧重复实现摘要比对逻辑。
+// 目录遍历复用打包器的安全收集规则:符号链接、非普通文件、含 '..'/绝对形态
+// 的路径名一律拒绝(已安装目录同样不容许逃逸通道)。
 func VerifyDir(dir string) (*Manifest, error) {
 	entries, err := collectEntries(dir)
 	if err != nil {
@@ -70,11 +64,8 @@ func VerifyDir(dir string) (*Manifest, error) {
 	return verifyExtracted(dir, extracted)
 }
 
-// verifyExtracted 是 Verify(zip 路径)与 VerifyDir(已安装目录)共用的
-// 第 2-5 步校验核心:manifest 存在性与字段合法性、checksums 集合双向相等、
-// 逐条目 sha256 比对(含 manifest 规范化自摘要)、executable 可执行位。
+// verifyExtracted 是 Verify(第 2-5 步)与 VerifyDir 共用的校验核心。
 func verifyExtracted(destDir string, entries []ExtractedEntry) (*Manifest, error) {
-	// —— 第 2 步:manifest 必须存在于解压结果中 ——
 	hasManifest := false
 	for _, e := range entries {
 		if e.Name == ManifestFileName {
@@ -96,7 +87,6 @@ func verifyExtracted(destDir string, entries []ExtractedEntry) (*Manifest, error
 		return nil, fmt.Errorf("manifest 校验失败: %w", err)
 	}
 
-	// —— 第 3 步:checksums 存在性与集合相等 ——
 	if len(m.Checksums) == 0 {
 		return nil, fmt.Errorf("校验失败:manifest 缺少 checksums 字段(包未经打包器注入,拒绝信任)")
 	}
@@ -118,7 +108,6 @@ func verifyExtracted(destDir string, entries []ExtractedEntry) (*Manifest, error
 		}
 	}
 
-	// —— 第 4 步:逐条目 sha256 比对 ——
 	for name, actual := range extracted {
 		if name == ManifestFileName {
 			continue
@@ -135,7 +124,6 @@ func verifyExtracted(destDir string, entries []ExtractedEntry) (*Manifest, error
 		return nil, fmt.Errorf("checksum 不匹配:manifest %s 期望 %s,实际 %s", ManifestFileName, expected, self)
 	}
 
-	// —— 第 5 步:executable 落盘且可执行 ——
 	execPath := filepath.Join(destDir, filepath.FromSlash(m.Executable))
 	fi, err := os.Stat(execPath)
 	if err != nil {

@@ -1,8 +1,7 @@
 package audit
 
-// hashtx.go —— todo 12 条件 tx 载荷扩展: Record ↔ 哈希载荷 / 记录回读解析。
-// ComputeEntryHash 的 6 参签名与拼接字节**严禁改动**(金样锚点), 本文件只做
-// 其记录形态超集: 基段 6 拼接逐字节复用, tx 段仅在 TxID 非空时条件追加。
+// hashtx.go —— 条件 tx 载荷扩展: Record ↔ 哈希载荷 / 记录回读解析。
+// 基段 6 拼接逐字节复用 ComputeEntryHash, tx 段仅在 TxID 非空时条件追加。
 
 import (
 	"crypto/sha256"
@@ -26,7 +25,7 @@ func payloadFor(r Record) []byte {
 
 // ComputeEntryHashRecord 是 ComputeEntryHash 的记录形态超集:
 // entry_hash = SHA-256(payloadFor(r)) 小写十六进制。
-// 非 tx 记录(TxID == "")必须与 6 参路径产生同一摘要(由 tx_test.go 钉桩)。
+// 非 tx 记录(TxID == "")必须与 6 参路径产生同一摘要(由 tx_test.go 把关)。
 func ComputeEntryHashRecord(r Record) string {
 	sum := sha256.Sum256(payloadFor(r))
 	return hex.EncodeToString(sum[:])

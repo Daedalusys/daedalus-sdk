@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestResolveSecret_FailClosed_NoPlaintext 是守门测试(todo 6 桩):
+// TestResolveSecret_FailClosed_NoPlaintext 是守门测试:
 // 明文 secret(非 secret:// 前缀)必须被 ResolveSecret 直接拒绝。
 //
 // 这是本包"明文 secret 永不出现在 audit log"强约束的第一道防线:

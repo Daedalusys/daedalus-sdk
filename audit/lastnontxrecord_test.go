@@ -1,8 +1,8 @@
 package audit
 
-// lastnontxrecord_test.go —— todo 12 无界回溯钉桩: 尾部挂任意长 in-tx 段时,
+// lastnontxrecord_test.go —— 无界回溯: 尾部挂任意长 in-tx 段时,
 // lastNonTxRecord 必须持续扩块命中其前最近一条非 tx 记录(旧 2 行窗口的
-// lastEntryHash 在该夹具下只能见到尾部 tx 行 → 本测试是 round-1 误规格的防回归)。
+// lastEntryHash 在该夹具下只能见到尾部 tx 行 → 本测试是该误规格的防回归)。
 
 import (
 	"os"

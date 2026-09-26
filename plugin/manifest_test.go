@@ -1,4 +1,4 @@
-// manifest.go 的表驱动测试:钉死计划规定的逐条校验规则。
+// manifest.go 的表驱动测试:逐条锁定校验规则。
 // 每个拒绝用例同时断言错误消息包含字段名与原因关键词。
 package plugin
 
@@ -10,16 +10,16 @@ import (
 // validManifest 返回一份字段完整的合法清单,测试用例在其上做单点变异。
 func validManifest() *Manifest {
 	return &Manifest{
-		ID:          "daedalus.copilot",
-		Name:        "Daedalus Copilot",
-		Version:     "1.0.0",
-		Type:        TypeCopilot,
-		Runtime:     RuntimeNative,
-		Executable:  "bin/main",
-		Entrypoint:  []string{"run", "--allow-all"},
-		APIVersion:  "0.1.0",
-		License:     "Apache-2.0",
-		Maintainer:  "team@daedalusys.io",
+		ID:         "daedalus.copilot",
+		Name:       "Daedalus Copilot",
+		Version:    "1.0.0",
+		Type:       TypeCopilot,
+		Runtime:    RuntimeNative,
+		Executable: "bin/main",
+		Entrypoint: []string{"run", "--allow-all"},
+		APIVersion: "0.1.0",
+		License:    "Apache-2.0",
+		Maintainer: "team@daedalusys.io",
 		Permissions: &Permissions{
 			Read:  []string{"/home"},
 			Write: []string{"/tmp"},
@@ -58,7 +58,7 @@ func TestValidate_AcceptsLegalManifests(t *testing.T) {
 	}
 }
 
-// TestValidate_Rejections 逐条钉死拒绝规则:字段名 + 原因都必须出现在错误消息里。
+// TestValidate_Rejections 逐条锁定拒绝规则:字段名 + 原因都必须出现在错误消息里。
 func TestValidate_Rejections(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -69,7 +69,7 @@ func TestValidate_Rejections(t *testing.T) {
 		{"id 大写", func(m *Manifest) { m.ID = "Daedalus.Copilot" }, "id"},
 		{"id 非法分层(空段)", func(m *Manifest) { m.ID = "daedalus..copilot" }, "id"},
 		{"id 含下划线", func(m *Manifest) { m.ID = "daedalus_copilot" }, "id"},
-		{"id 含连字符(计划文法仅允许 [a-z0-9])", func(m *Manifest) { m.ID = "daedalus-copilot" }, "id"},
+		{"id 含连字符(文法仅允许 [a-z0-9])", func(m *Manifest) { m.ID = "daedalus-copilot" }, "id"},
 		{"id 以点开头", func(m *Manifest) { m.ID = ".daedalus" }, "id"},
 		{"id 以点结尾", func(m *Manifest) { m.ID = "daedalus." }, "id"},
 		{"缺 name", func(m *Manifest) { m.Name = "" }, "name"},
@@ -117,7 +117,7 @@ func TestValidate_Rejections(t *testing.T) {
 	}
 }
 
-// TestParseManifest 钉死 JSON 边界:语法错误、未知字段、尾随内容都必须拒绝;
+// TestParseManifest 锁定 JSON 边界:语法错误、未知字段、尾随内容都必须拒绝;
 // prompt injection 面:name/tools 只是数据,解析与校验绝不执行。
 func TestParseManifest(t *testing.T) {
 	tests := []struct {
@@ -159,7 +159,7 @@ func TestParseManifest(t *testing.T) {
 	}
 }
 
-// TestValidateRelativePath 钉死共用路径校验器的边界组合。
+// TestValidateRelativePath 锁定共用路径校验器的边界组合。
 func TestValidateRelativePath(t *testing.T) {
 	rejects := []string{"", "/abs", "a/../../b", "..", "../x", "x/..", "a\x00b", `a\b`, "dir/", "/"}
 	for _, p := range rejects {
@@ -175,7 +175,7 @@ func TestValidateRelativePath(t *testing.T) {
 	}
 }
 
-// TestManifestAPIVersion 钉死 api_version 字段:必填 + 语义化版本格式。
+// TestManifestAPIVersion 锁定 api_version 字段:必填 + 语义化版本格式。
 func TestManifestAPIVersion(t *testing.T) {
 	accepts := []string{"0.1.0", "1.2.3", "v2.0.0", "1.2.3-rc.1", "10.20.30+build.7"}
 	for _, v := range accepts {
@@ -200,7 +200,7 @@ func TestManifestAPIVersion(t *testing.T) {
 	}
 }
 
-// TestManifestLicense 钉死 license 字段:必填 + SPDX 标识格式。
+// TestManifestLicense 锁定 license 字段:必填 + SPDX 标识格式。
 func TestManifestLicense(t *testing.T) {
 	accepts := []string{"Apache-2.0", "MIT", "GPL-3.0-or-later", "BSD-2-Clause", "0BSD"}
 	for _, v := range accepts {
@@ -226,7 +226,7 @@ func TestManifestLicense(t *testing.T) {
 	}
 }
 
-// TestManifestMaintainer 钉死 maintainer 字段:必填 + 邮箱格式。
+// TestManifestMaintainer 锁定 maintainer 字段:必填 + 邮箱格式。
 func TestManifestMaintainer(t *testing.T) {
 	accepts := []string{"team@daedalusys.io", "a.b+c@example.co.jp", "dev@localhost.io"}
 	for _, v := range accepts {
@@ -252,9 +252,9 @@ func TestManifestMaintainer(t *testing.T) {
 	}
 }
 
-// TestManifestRuntimeStruct 钉死 Runtime 结构化形态:
+// TestManifestRuntimeStruct 锁定 Runtime 结构化形态:
 //   - 老 manifest("runtime": "deno" 字符串)经 UnmarshalJSON 仍能反序列化为
-//     Runtime{Name: "deno"}(todo 11 改 6 插件 manifest 前,校验器必须能读);
+//     Runtime{Name: "deno"}(老形态清单必须仍可被校验器读取);
 //   - 新形态对象 {"name": "deno", "version": "2.1.4"} 照常解析;
 //   - String() 输出与 Runtime 值常量可直接比较。
 func TestManifestRuntimeStruct(t *testing.T) {

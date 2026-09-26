@@ -1,4 +1,4 @@
-// manifest.go resources 字段(todo 2)的专项测试:接受面/拒绝面/JSON 边界,
+// manifest.go resources 字段的专项测试:接受面/拒绝面/JSON 边界,
 // 以及对仓库内 5 个官方插件 manifest 源文件的向后兼容硬断言。
 package plugin
 
@@ -11,7 +11,7 @@ import (
 	"github.com/Daedalusys/daedalus-sdk/objectmodel"
 )
 
-// TestManifest_Resources_Accepts 钉死 todo 2 的接受面:合法 resources 条目
+// TestManifest_Resources_Accepts 锁定接受面:合法 resources 条目
 // (含 "*" 通配与空 desired_state)、字段缺席/为空数组时行为与旧版完全一致
 // (向后兼容:5 个官方 manifest 均无该字段,必须照常通过)。
 func TestManifest_Resources_Accepts(t *testing.T) {
@@ -39,7 +39,7 @@ func TestManifest_Resources_Accepts(t *testing.T) {
 	}
 }
 
-// TestManifest_Resources_Rejects 钉死 todo 2 的拒绝面:每类畸形输入都必须
+// TestManifest_Resources_Rejects 锁定拒绝面:每类畸形输入都必须
 // 被拒,且错误消息带 resources[i] 字段路径(与 tools[1] 的既有风格同源)。
 func TestManifest_Resources_Rejects(t *testing.T) {
 	tests := []struct {
@@ -74,7 +74,7 @@ func TestManifest_Resources_Rejects(t *testing.T) {
 	}
 }
 
-// TestParseManifest_Resources 钉死 resources 的 JSON 边界:合法数组解析进字段;
+// TestParseManifest_Resources 锁定 resources 的 JSON 边界:合法数组解析进字段;
 // 条目内未知字段与顶层未知字段同样被 DisallowUnknownFields 拒绝(拼错的
 // 声明键不得静默丢弃);字段缺席时保持 nil(omitempty 往返)。
 func TestParseManifest_Resources(t *testing.T) {
@@ -119,20 +119,34 @@ func TestParseManifest_Resources(t *testing.T) {
 }
 
 // TestValidate_OfficialPluginManifests 向后兼容硬断言:仓库内官方插件
-// manifest 源文件(6 个能力插件在 daedalus-plugins/,copilot 留主仓
+// manifest 源文件(7 个能力插件在 daedalus-plugins/,copilot 留主仓
 // daedalus-core/plugin/copilot/)必须能被 ParseManifest 读取,且:
-//   - 6 个能力插件(todo 11 已升级 C1 schema,含 api_version/license/maintainer
+//   - 7 个能力插件(已升级 C1 schema,含 api_version/license/maintainer
 //     与 runtime 对象)必须通过 Validate;
-//   - copilot manifest(todo 11 明确不改)仍缺新必填字段,Validate 必须被拒——
+//   - copilot manifest(明确不改)仍缺新必填字段,Validate 必须被拒——
 //     证明校验器能读老清单但要求新字段。
+//
+// 执行点不在本仓 CI:相对路径 ../../daedalus-plugins 落在 GITHUB_WORKSPACE
+// 之外,Actions 不允许 checkout 逃到那里,所以 SDK 单独跑必然缺兄弟仓。兄弟根
+// 缺失即显式 skip;真正的执行点是 daedalus-core 的 test job(它把三仓检出到同一
+// workspace 的平级子目录,相对路径恰好吃满)。只钉 plugins 一个根:copilot 根缺
+// 席不在兜底范围内,该子测试照常 fail——半套布局不能当作通过。
 func TestValidate_OfficialPluginManifests(t *testing.T) {
-	ids := []struct{ id, dir string; wantValid bool }{
-		{"fs", filepath.Join("..", "..", "daedalus-plugins", "fs"), true},
-		{"shell", filepath.Join("..", "..", "daedalus-plugins", "shell"), true},
-		{"pkg", filepath.Join("..", "..", "daedalus-plugins", "pkg"), true},
-		{"sysinfo", filepath.Join("..", "..", "daedalus-plugins", "sysinfo"), true},
-		{"service", filepath.Join("..", "..", "daedalus-plugins", "service"), true},
-		{"blueprint", filepath.Join("..", "..", "daedalus-plugins", "blueprint"), true},
+	pluginsRoot := filepath.Join("..", "..", "daedalus-plugins")
+	if _, err := os.Stat(pluginsRoot); err != nil {
+		t.Skipf("兄弟仓未检出(%s 不存在);本校验由 daedalus-core test job 执行", pluginsRoot)
+	}
+	ids := []struct {
+		id, dir   string
+		wantValid bool
+	}{
+		{"fs", filepath.Join(pluginsRoot, "fs"), true},
+		{"shell", filepath.Join(pluginsRoot, "shell"), true},
+		{"pkg", filepath.Join(pluginsRoot, "pkg"), true},
+		{"sysinfo", filepath.Join(pluginsRoot, "sysinfo"), true},
+		{"service", filepath.Join(pluginsRoot, "service"), true},
+		{"blueprint", filepath.Join(pluginsRoot, "blueprint"), true},
+		{"dupe", filepath.Join(pluginsRoot, "dupe"), true},
 		{"copilot", filepath.Join("..", "..", "daedalus-core", "plugin", "copilot"), false},
 	}
 	for _, tc := range ids {
@@ -152,7 +166,7 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 			}
 			err = m.Validate()
 			if tc.wantValid {
-				// todo 11 已升级 6 个能力插件 manifest(含 api_version/license/maintainer)
+				// 6 个能力插件 manifest 已升级(含 api_version/license/maintainer)
 				if err != nil {
 					t.Fatalf("官方 manifest 应通过校验: %v", err)
 				}

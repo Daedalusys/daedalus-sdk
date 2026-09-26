@@ -46,7 +46,7 @@ func TestArgsString_MatchesPythonDumps(t *testing.T) {
 }
 
 func TestArgsString_RawStringPassthrough(t *testing.T) {
-	// audit-log.py:31-32: args 为 str 时直接原文参与哈希(无引号无转义)。
+	// args 为 str 时直接原文参与哈希(无引号无转义)。
 	v := NewString("not valid json { at all")
 	if got := v.ArgsString(); got != "not valid json { at all" {
 		t.Fatalf("原始字符串 args_str = %q, 期望原文直传", got)
@@ -181,7 +181,7 @@ func TestFormatTimestamp_QuirkParity(t *testing.T) {
 }
 
 func TestComputeEntryHash_PayloadConcatOrder(t *testing.T) {
-	// 与 tests/test_mcp_integration.py:344-346 三方一致的独立公式。
+	// 与 Python 集成测试三方一致的独立公式。
 	h := ComputeEntryHash("TS", "id", "tool", "{}", "success", GenesisHash)
 	// sha256("TSidtool{}success" + "0"*64) 的期望值由独立重算得出:
 	want := sha256Hex(t, "TSidtool{}success"+GenesisHash)

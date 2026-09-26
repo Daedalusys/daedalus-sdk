@@ -21,7 +21,7 @@ var requiredFields = []string{
 //  2. 首条有效记录的 prev_hash 必须为 GenesisHash;
 //  3. 每条记录的 prev_hash 必须等于上一条的 entry_hash(全局链连续性);
 //  4. 每条记录的 entry_hash 必须等于按 §4.3 载荷重算的哈希(防篡改);
-//  5. 双链(todo 13): in-tx 记录另走逐事务链。每个 TxID 的首条记录(tx_begin,
+//  5. 双链: in-tx 记录另走逐事务链。每个 TxID 的首条记录(tx_begin,
 //     step 0)的 tx_prev_hash 必须等于**最近一条非 tx 记录**的 entry_hash
 //     (lastNonTxHash 快照, 初始为创世; 两 begin 可共享同一创世); 同事务后续
 //     记录的 tx_prev_hash 必须等于该事务上一条 in-tx 记录的 entry_hash。
@@ -41,7 +41,7 @@ func Verify(logPath string) (int, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // 审计行可能含长 args, 上限 4MiB
 
-	// 双链遍历器(todo 13 钉桩, 单趟): lastGlobalHash 即既有 prev 递推;
+	// 双链遍历器(单趟): lastGlobalHash 即既有 prev 递推;
 	// lastNonTxHash 在每条 TxID 为空的记录通过后刷新; inTx/seen 按事务记
 	// 最近 in-tx entry_hash 与是否已见(首见即 begin, 走创世断言)。
 	prev := GenesisHash
@@ -77,7 +77,7 @@ func Verify(logPath string) (int, error) {
 			return count, fmt.Errorf(
 				"audit: 第 %d 行链断裂: prev_hash=%s, 期望 %s", lineNo, fields["prev_hash"], prev)
 		}
-		// 哈希派发(todo 12) + 记录形态回读: 非 tx 行走原 6 参常量路径(金样逐字节不变);
+		// 哈希派发 + 记录形态回读: 非 tx 行走原 6 参常量路径(金样逐字节不变);
 		// in-tx 行走记录形态, 使 tx_id/tx_step/tx_prev_hash 参与重算(篡改可见),
 		// 并复用还原出的 rec 做下方事务链断言。
 		var rec Record
@@ -99,7 +99,7 @@ func Verify(logPath string) (int, error) {
 			return count, fmt.Errorf(
 				"audit: 第 %d 行哈希不符: entry_hash=%s, 重算=%s", lineNo, fields["entry_hash"], recomputed)
 		}
-		// 事务链断言(todo 13): 先判链, 全部通过后统一刷新三个遍历器。
+		// 事务链断言: 先判链, 全部通过后统一刷新三个遍历器。
 		// 首见 TxID → 创世断言比对 lastNonTxHash 快照(= 严格先于本行的最近非 tx
 		// 条目 entry_hash; 确定性强于回溯读, 无需调 lastNonTxRecord); 否则比对
 		// 同事务上一条 entry_hash。tx_prev_hash 缺失按空串参与比较(recordFromValue

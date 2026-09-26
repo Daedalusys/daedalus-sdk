@@ -1,6 +1,6 @@
 package audit
 
-// tx_test.go —— todo 12 条件 tx 扩展(test-first 钉桩):
+// tx_test.go —— 条件 tx 扩展:
 //   - ComputeEntryHashRecord/payloadFor 的非 tx 逐字节恒等 + in-tx 载荷扩展参与哈希;
 //   - toValue 条件发射: 金样每一行经**新 toValue 路径**重序列化仍逐字节相等;
 //   - LogAudit 写侧派发 + 篡改 tx_id 破坏全局 Verify;
@@ -160,7 +160,7 @@ func TestAudit_TxTamperTxIDBreaksGlobalVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 盖章规则(todo 13 双链定版): tx_begin 创世 = 最近非 tx 条目 entry_hash,
+	// 盖章规则: tx_begin 创世 = 最近非 tx 条目 entry_hash,
 	// 而非 64 零 —— 本夹具首条非 tx 在前, 创世快照须指向 first.EntryHash。
 	if _, err := LogAudit(Entry{Identity: "daedalus-tx", Tool: "tx_apply",
 		Args: mustParse(t, `{"step": 1}`), TxID: "aaaa1111bbbb2222", TxStep: 1,
