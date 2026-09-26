@@ -1,12 +1,13 @@
-# Secret Provider 占位
+# SecretProvider contract(已填实)
 
-本目录为 #42 Provider/Slot 抽象的占位（issue #46 C3 拍板）。
+daedalus-sdk#2 钉死的第一批 slot contract 之一(原 Daedalusys/Daedalusys#42;
+消费者议题 #33 KWallet / #34 systemd-creds)。
 
-## 状态
-- 当前：空目录 + README，仅声明 slot 名
-- 目标：等 #42 落地时填实 contract 与实现
+## 形态
+- `secretprovider.go`:`Ref` 形状门、`Secret` 脱敏值类型、`Provider` 接口、哨兵错误;
+- **契约缝·零运行时**:无实现、无注册表,provider 接线归消费方 cmd/daemon 构造期;
+- 语义单一事实源:仓内 `docs/provider-slot.md` §2。
 
-## 参考
-- issue #46：[Architecture] daedalus-sdk 抽出 + 内置插件独立仓
-- issue #42：[Architecture] Provider / Slot 架构
-- 相关议题：#33（KWallet 抽象）/ #34（systemd-creds 抽象）
+## 测试
+`secretprovider_test.go` 钉引用形状表、脱敏红线(String/GoString/MarshalJSON)
+与接口形状(内存 fake 静态实现)。

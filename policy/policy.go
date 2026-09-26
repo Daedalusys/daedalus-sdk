@@ -36,7 +36,7 @@ const (
 	EnvPolicyMode = "DAEDALUS_POLICY_MODE"
 	// PolicyModeDevelopment 是 EnvPolicyMode 唯一接受的取值。
 	PolicyModeDevelopment = "development"
-	ProductionPath   = "/opt/daedalus/shared/policy.toml"
+	ProductionPath        = "/opt/daedalus/shared/policy.toml"
 )
 
 // DevRelPaths 是开发态回溯的候选相对路径列表(自 cwd 逐级上溯,每层目录 ×

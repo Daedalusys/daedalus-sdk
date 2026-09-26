@@ -6,7 +6,8 @@
 
 ## OVERVIEW
 Daedalus SDK 仓根 = 四层结构中的 **SDK 层**(决策 23/24 + 25)。
-11 个安全核心包(从 `daedalus-core/internal/` 迁出)+ 5 个 Provider/Slot 占位目录 +
+11 个安全核心包(从 `daedalus-core/internal/` 迁出)+ slot 词汇包 +
+SecretProvider/MemoryProvider contract 包(daedalus-sdk#2 填实)+ 3 个 Provider/Slot 占位目录 +
 2 个编排器裁决迁入包(`state/` `dirs/`)。**公开 contract 仓**:包是顶级包,可被外部模块 import;
 失去 Go 编译器"同模块限可见"防护,威胁模型见下段。
 
@@ -26,8 +27,9 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 ├── version/       # 版本常量与构建信息
 ├── state/         # state.jsonl 追加式观测缓存 (todo 6 迁入)
 ├── dirs/          # state/tx 根路径统一解析链 (todo 6 迁入)
-├── secretprovider/  ← Provider/Slot 占位 (#33 KWallet + #34 systemd-creds)
-├── memoryprovider/  ← Provider/Slot 占位 (#29 持久记忆)
+├── slot/          # Provider/Slot 共享词汇 (swappability Level 枚举, sdk#2)
+├── secretprovider/  # SecretProvider contract 已钉 (#33 + #34; 语义见 docs/provider-slot.md)
+├── memoryprovider/  # MemoryProvider contract 已钉 (#29; 语义见 docs/provider-slot.md)
 ├── modelprovider/   ← Provider/Slot 占位 (#31 prompt cache)
 ├── agentprovider/   ← Provider/Slot 占位 (未来 agent)
 └── transportprovider/  ← Provider/Slot 占位 (MCP stdio/HTTP/A2A)
@@ -91,7 +93,8 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 - **NEVER** 修改 `shellpolicy` / `pathguard` / `policy` 常量而不联动 `policy.Default()` 与 policy.toml(三点防漂移测试会拒)。
 - **NEVER** 让 SDK 包绕过 policy 加载流程 — 必须经 `policy.Load` / `policy.LoadOrDefault`。
 - **NEVER** 让 SDK 包暴露 `internal/` 防护(已迁出的包就是公开面,不要再加 `internal/` 子目录)。
-- **NEVER** 在 Provider/Slot 占位目录(`secretprovider/` 等 5 个)写 Go 代码 — 等 #42 落地时填实 contract;空目录 + README 是当前合法形态。
+- **NEVER** 在 Provider/Slot 占位目录(`modelprovider/` 等剩余 3 个)写 Go 代码 — sdk#2 已填实 `slot/` `secretprovider/` `memoryprovider/` 契约;其余等各自 issue 落地,空目录 + README 仍是其合法形态。
+- **NEVER** 在 `secretprovider/` / `memoryprovider/` 写 provider 实现、注册表或装配逻辑 — 契约缝·零运行时(镜像 `internal/controller` 先例);实现与接线归消费方 cmd/daemon 构造期。
 - **NEVER** 在 SDK 包内做运行时防护(防越界 / 防绕过)— 那是 core 仓 systemd drop-in 的职责;SDK 只定义规则,不强制规则。
 
 ## COMMANDS
@@ -121,7 +124,7 @@ go test -run TestGolden ./audit/...
 ## NOTES
 - 本仓与 `daedalus-core` (Daedalusys)、`daedalus-plugins` 经 `go.work` 平级桥接;**单仓发布,跨仓协作**。
 - 新增 SDK 包 = 在根加新目录 + 同步更新 README「包索引」表;新增 Kind 必经 `objectmodel/Kind` 常量 + `kindRegistry` + 校验分支 + `policy.toml [objectmodel].enabled_kinds` 三处漂移测试。
-- 5 个 Provider/Slot 占位(secretprovider/memoryprovider/modelprovider/agentprovider/transportprovider)等待 issue #42 落地时填实 contract;**目前请勿在这些目录写 Go 代码**。
+- Provider/Slot 架构(daedalus-sdk#2,原 #42):`slot/` `secretprovider/` `memoryprovider/` 已填实契约(语义事实源 `docs/provider-slot.md`);modelprovider/agentprovider/transportprovider 仍为占位,**请勿在这 3 个目录写 Go 代码**。
 - 测试布局: `*_test.go` 随包;`testdata/` 内是金样向量 / 配置文件。
 - SDK 公开面**不豁免** `daedalus-core/AGENTS.md` 的 ANTI-PATTERNS 条款(中文注释 / 零 image 残留 / 审计链经 CLI 等)。
 - 老仓 `Daedalusys/Daedalusys` 已于 2026-09-21 archived,历史 issue 保留可读;新 issue 一律开在本仓。
