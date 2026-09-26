@@ -1,5 +1,5 @@
 // manifest.go resources 字段的专项测试:接受面/拒绝面/JSON 边界,
-// 以及对仓库内 5 个官方插件 manifest 源文件的向后兼容硬断言。
+// 以及对仓库内 8 个官方插件 manifest 源文件的向后兼容硬断言。
 package plugin
 
 import (
@@ -119,9 +119,9 @@ func TestParseManifest_Resources(t *testing.T) {
 }
 
 // TestValidate_OfficialPluginManifests 向后兼容硬断言:仓库内官方插件
-// manifest 源文件(7 个能力插件在 daedalus-plugins/,copilot 留主仓
+// manifest 源文件(8 个能力插件在 daedalus-plugins/,copilot 留主仓
 // daedalus-core/plugin/copilot/)必须能被 ParseManifest 读取,且:
-//   - 7 个能力插件(已升级 C1 schema,含 api_version/license/maintainer
+//   - 8 个能力插件(已升级 C1 schema,含 api_version/license/maintainer
 //     与 runtime 对象)必须通过 Validate;
 //   - copilot manifest(明确不改)仍缺新必填字段,Validate 必须被拒——
 //     证明校验器能读老清单但要求新字段。
@@ -147,6 +147,7 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 		{"service", filepath.Join(pluginsRoot, "service"), true},
 		{"blueprint", filepath.Join(pluginsRoot, "blueprint"), true},
 		{"dupe", filepath.Join(pluginsRoot, "dupe"), true},
+		{"trace", filepath.Join(pluginsRoot, "trace"), true},
 		{"copilot", filepath.Join("..", "..", "daedalus-core", "plugin", "copilot"), false},
 	}
 	for _, tc := range ids {
@@ -166,7 +167,7 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 			}
 			err = m.Validate()
 			if tc.wantValid {
-				// 6 个能力插件 manifest 已升级(含 api_version/license/maintainer)
+				// 能力插件 manifest 已升级(含 api_version/license/maintainer)
 				if err != nil {
 					t.Fatalf("官方 manifest 应通过校验: %v", err)
 				}
