@@ -6,9 +6,10 @@
 //
 // 路径解析优先级:DAEDALUS_POLICY_PATH 环境变量(显式指向,文件损坏/缺失一律
 // 报错,绝不静默吞掉)→ 生产路径 /opt/daedalus/shared/policy.toml → 开发态
-// 自 cwd 逐级上溯尝试 DevRelPaths 候选。三处皆无 → ErrNotFound(调用方经
-// LoadOrDefault 回退 Default(),保证"无 policy 服务器也能启动");显式指向的
-// TOML 损坏或字段缺失 → 拒绝启动(fail-closed)。
+// 自 cwd 逐级上溯尝试 DevRelPaths 候选。三处皆无 → ErrNotFound;LoadOrDefault
+// 默认同样 fail-closed 拒绝启动(与"损坏拒绝启动"哲学一致),仅显式设置
+// DAEDALUS_POLICY_MODE=development(开发/测试 opt-in)才回退 Default(),
+// 不隐式猜测环境。
 //
 // ALLOW_COMMANDS 环境变量维持 REPLACE 语义(与 shellpolicy.ResolveAllowCommands
 // 一致):非空时整体替换 allowed_commands,而非取并集。
@@ -30,6 +31,11 @@ const (
 	EnvPolicyPath = "DAEDALUS_POLICY_PATH"
 	// EnvAllowCommands 是命令白名单的整体替换环境变量(REPLACE 语义)。
 	EnvAllowCommands = "ALLOW_COMMANDS"
+	// EnvPolicyMode 是策略缺失时的回退开关:仅取值 development 才允许
+	// LoadOrDefault 回退 Default();缺省(生产语义)fail-closed 拒绝启动。
+	EnvPolicyMode = "DAEDALUS_POLICY_MODE"
+	// PolicyModeDevelopment 是 EnvPolicyMode 唯一接受的取值。
+	PolicyModeDevelopment = "development"
 	ProductionPath   = "/opt/daedalus/shared/policy.toml"
 )
 
@@ -41,7 +47,8 @@ var DevRelPaths = []string{
 	"testdata/policy.toml", // SDK 仓自带 fixture(CWD 级命中)
 }
 
-// ErrNotFound 表示按解析优先级未找到任何策略文件,可回退 Default();
+// ErrNotFound 表示按解析优先级未找到任何策略文件(生产语义 fail-closed;
+// 回退 Default() 需 DAEDALUS_POLICY_MODE=development 显式 opt-in);
 // 与"文件存在但损坏/字段缺失"(真解析错误)严格区分,后者必须拒绝启动。
 var ErrNotFound = errors.New("policy: 未找到 policy.toml(生产路径与仓库回溯均未命中)")
 
@@ -152,12 +159,18 @@ func Load(path string) (*Policy, error) {
 	return &p, nil
 }
 
-// LoadOrDefault 是服务器启动入口:策略文件整体缺失时回退 Default();
-// 文件存在但损坏/字段缺失时原样报错,调用方必须拒绝启动。
+// LoadOrDefault 是服务器启动入口:策略文件整体缺失时默认 fail-closed 报错
+// (与损坏语义一致,拒绝启动);仅 DAEDALUS_POLICY_MODE=development 显式
+// opt-in 才回退 Default()。文件存在但损坏/字段缺失时原样报错,调用方必须
+// 拒绝启动。
 func LoadOrDefault() (*Policy, error) {
 	p, err := Load("")
 	if errors.Is(err, ErrNotFound) {
-		return Default(), nil
+		if os.Getenv(EnvPolicyMode) == PolicyModeDevelopment {
+			return Default(), nil
+		}
+		return nil, fmt.Errorf("policy: 策略文件缺失,fail-closed 拒绝启动(开发/测试需回退内置默认请显式设置 %s=%s): %w",
+			EnvPolicyMode, PolicyModeDevelopment, err)
 	}
 	return p, err
 }
