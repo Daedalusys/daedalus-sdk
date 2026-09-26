@@ -119,23 +119,34 @@ func TestParseManifest_Resources(t *testing.T) {
 }
 
 // TestValidate_OfficialPluginManifests 向后兼容硬断言:仓库内官方插件
-// manifest 源文件(6 个能力插件在 daedalus-plugins/,copilot 留主仓
+// manifest 源文件(7 个能力插件在 daedalus-plugins/,copilot 留主仓
 // daedalus-core/plugin/copilot/)必须能被 ParseManifest 读取,且:
-//   - 6 个能力插件(已升级 C1 schema,含 api_version/license/maintainer
+//   - 7 个能力插件(已升级 C1 schema,含 api_version/license/maintainer
 //     与 runtime 对象)必须通过 Validate;
 //   - copilot manifest(明确不改)仍缺新必填字段,Validate 必须被拒——
 //     证明校验器能读老清单但要求新字段。
+//
+// 执行点不在本仓 CI:相对路径 ../../daedalus-plugins 落在 GITHUB_WORKSPACE
+// 之外,Actions 不允许 checkout 逃到那里,所以 SDK 单独跑必然缺兄弟仓。兄弟根
+// 缺失即显式 skip;真正的执行点是 daedalus-core 的 test job(它把三仓检出到同一
+// workspace 的平级子目录,相对路径恰好吃满)。只钉 plugins 一个根:copilot 根缺
+// 席不在兜底范围内,该子测试照常 fail——半套布局不能当作通过。
 func TestValidate_OfficialPluginManifests(t *testing.T) {
+	pluginsRoot := filepath.Join("..", "..", "daedalus-plugins")
+	if _, err := os.Stat(pluginsRoot); err != nil {
+		t.Skipf("兄弟仓未检出(%s 不存在);本校验由 daedalus-core test job 执行", pluginsRoot)
+	}
 	ids := []struct {
 		id, dir   string
 		wantValid bool
 	}{
-		{"fs", filepath.Join("..", "..", "daedalus-plugins", "fs"), true},
-		{"shell", filepath.Join("..", "..", "daedalus-plugins", "shell"), true},
-		{"pkg", filepath.Join("..", "..", "daedalus-plugins", "pkg"), true},
-		{"sysinfo", filepath.Join("..", "..", "daedalus-plugins", "sysinfo"), true},
-		{"service", filepath.Join("..", "..", "daedalus-plugins", "service"), true},
-		{"blueprint", filepath.Join("..", "..", "daedalus-plugins", "blueprint"), true},
+		{"fs", filepath.Join(pluginsRoot, "fs"), true},
+		{"shell", filepath.Join(pluginsRoot, "shell"), true},
+		{"pkg", filepath.Join(pluginsRoot, "pkg"), true},
+		{"sysinfo", filepath.Join(pluginsRoot, "sysinfo"), true},
+		{"service", filepath.Join(pluginsRoot, "service"), true},
+		{"blueprint", filepath.Join(pluginsRoot, "blueprint"), true},
+		{"dupe", filepath.Join(pluginsRoot, "dupe"), true},
 		{"copilot", filepath.Join("..", "..", "daedalus-core", "plugin", "copilot"), false},
 	}
 	for _, tc := range ids {
