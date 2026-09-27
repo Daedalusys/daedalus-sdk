@@ -1,5 +1,4 @@
-// Package memoryprovider 钉 MemoryProvider slot 的第一批 contract
-// (daedalus-sdk#2,消费者议题 #29 持久记忆)。
+// Package memoryprovider 钉 MemoryProvider slot 的第一批 contract(持久记忆)。
 //
 // 职责边界(契约缝·零运行时,同 secretprovider 姿势):
 //   - 只有接口、条目形状、scope 枚举与哨兵错误,没有任何实现/注册表;
@@ -11,7 +10,7 @@
 // 本包不迁 state 消费者。
 //
 // 跨 slot 铁律:记忆值里不得存 secret 明文,只允许 `secret://` 引用
-// (#29);写侧替换/读侧解析归装配层,本包以 json.RawMessage 承载值,
+// 写侧替换/读侧解析归装配层,本包以 json.RawMessage 承载值,
 // 不承诺也无法在类型层强制——文档化 + 评审门。
 package memoryprovider
 
@@ -36,7 +35,7 @@ var (
 	ErrSearchUnavailable = errors.New("memoryprovider: 检索后端不可用")
 )
 
-// Scope 是记忆的治理域,封闭枚举(#29 scope=user|system)。
+// Scope 是记忆的治理域,封闭枚举(scope=user|system)。
 type Scope string
 
 const (
@@ -64,7 +63,7 @@ type Entry struct {
 	TTL   time.Duration   `json:"ttl_ns,omitempty"`
 }
 
-// Provider 是 MemoryProvider slot 的稳定 contract,方法与 #29 工具面
+// Provider 是 MemoryProvider slot 的稳定 contract,方法与记忆工具面
 // 对应(get/set/delete/list/search)。实现者义务:
 //   - Key 非空且不含空白(扁平命名空间,形状由 provider 统一收口);
 //   - Search 未启用必须回 ErrSearchUnavailable,禁止静默返回空集;
@@ -72,14 +71,14 @@ type Entry struct {
 type Provider interface {
 	// Swappability 声明替换上限;builtin 文件后端钉 L1,L3 单独裁决。
 	Swappability() slot.Level
-	// Get 按 scope+key 取一条(#29 memory_get)。
+	// Get 按 scope+key 取一条(memory_get)。
 	Get(ctx context.Context, scope Scope, key string) (Entry, error)
-	// Set 写入一条(#29 memory_set;confirm_token 归工具面,不在此层)。
+	// Set 写入一条(memory_set;confirm_token 归工具面,不在此层)。
 	Set(ctx context.Context, e Entry) error
-	// Delete 删除一条(#29 memory_delete)。
+	// Delete 删除一条(memory_delete)。
 	Delete(ctx context.Context, scope Scope, key string) error
-	// List 按 scope + 前缀列键(#29 memory_list;只回键,不回值)。
+	// List 按 scope + 前缀列键(memory_list;只回键,不回值)。
 	List(ctx context.Context, scope Scope, prefix string) ([]string, error)
-	// Search 语义检索(#29 memory_search;嵌入未启用 → ErrSearchUnavailable)。
+	// Search 语义检索(memory_search;嵌入未启用 → ErrSearchUnavailable)。
 	Search(ctx context.Context, query string, limit int) ([]Entry, error)
 }

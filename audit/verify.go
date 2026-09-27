@@ -20,7 +20,7 @@ var requiredFields = []string{
 //  1. 逐行: 跳过空行; 任一非空行不可解析/缺字段/字段类型错 → 报损坏;
 //  2. 首条有效记录的 prev_hash 必须为 GenesisHash;
 //  3. 每条记录的 prev_hash 必须等于上一条的 entry_hash(全局链连续性);
-//  4. 每条记录的 entry_hash 必须等于按 §4.3 载荷重算的哈希(防篡改);
+//  4. 每条记录的 entry_hash 必须等于按 payloadFor(hashtx.go)载荷重算的哈希(防篡改);
 //  5. 双链: in-tx 记录另走逐事务链。每个 TxID 的首条记录(tx_begin,
 //     step 0)的 tx_prev_hash 必须等于**最近一条非 tx 记录**的 entry_hash
 //     (lastNonTxHash 快照, 初始为创世; 两 begin 可共享同一创世); 同事务后续

@@ -1,4 +1,4 @@
-// Package objectmodel 定义 AIOS 对象模型的类型化资源模式(C1 基础层)。
+// Package objectmodel 定义 AIOS 对象模型的类型化资源模式。
 //
 // Agent 对 OS 的每次变更都作用于一个"资源"(Resource)——由
 // kind + name + desired_state 三元组描述,而不是散落的裸命令。资源经

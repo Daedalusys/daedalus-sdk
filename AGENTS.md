@@ -81,15 +81,15 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 
 **威胁面增量(明确)**。`policy` / `shellpolicy` / `pathguard` / `audit` 等包从 `daedalus-core/internal/` 迁出后变为顶级包,公开可被 import。失去"同模块限可见"防护后:
 - 可绕过 policy 加载流程直接构造 `policy.Default()`,或 import `shellpolicy`/`pathguard` 常量自行拼装"看起来合法"策略对象;
-- 可 import `audit` 直接写审计文件,绕过 `daedalus-audit` CLI 哈希链入口;
+- 可 import `audit` 手搓哈希链格式直写审计文件,绕开 `LogAudit` 单一实现(链断裂/序列化漂移风险);
 - 可借 SDK 包探测策略形状,为后续攻击做准备。
 
-**补偿控制(运行时侧,core 仓守)**。SDK 包本身不做运行时防护——防护在**消费方进程的 systemd 沙箱**上:`DynamicUser=yes` + `ProtectSystem=strict` / `ReadOnlyPaths=/opt/daedalus/shared/policy.toml` + `daedalus-*.service.d/landlock.conf` (seccomp 白名单 + `MemoryDenyWriteExecute=yes`)。审计写入一律经 `daedalus-audit` CLI,进程内**禁止**直接 import `audit` 写文件。
+**补偿控制(运行时侧,core 仓守)**。SDK 包本身不做运行时防护——防护在**消费方进程的 systemd 沙箱**上:`DynamicUser=yes` + `ProtectSystem=strict` / `ReadOnlyPaths=/opt/daedalus/shared/policy.toml` + `daedalus-*.service.d/landlock.conf` (seccomp 白名单 + `MemoryDenyWriteExecute=yes`)。审计写入的唯一合规入口就是本包 `audit.LogAudit`(哈希链单一实现,Go 侧进程内调用);非 Go 写入方经 core 仓 `daedalus-audit` CLI 桥接(其内部同样落 `LogAudit`);手搓链格式/绕过本包直写文件禁止。
 
 **trade-off 立场**: SDK 路线 = 公开 contract(否则 SDK 不可用)。issue #46 决定走 SDK 路线 = 接受此 trade-off。安全边界从"编译器强制"转移到"运行时沙箱强制",由下游使用方承担。
 
 ## ANTI-PATTERNS (THIS REPO)
-- **NEVER** 直接 import `audit` 写文件 — 必经 `daedalus-audit` CLI (`--identity/--tool/--args/--outcome/--log-path`)。
+- **NEVER** 手搓哈希链格式或绕过本包直写审计文件 — Go 侧唯一合规写入口是 `audit.LogAudit`;非 Go 写入方经 core 仓 `daedalus-audit` CLI (`--identity/--tool/--args/--outcome/--log-path`) 桥接,不得在 SDK 之外另立第二套写入实现。
 - **NEVER** 修改 `shellpolicy` / `pathguard` / `policy` 常量而不联动 `policy.Default()` 与 policy.toml(三点防漂移测试会拒)。
 - **NEVER** 让 SDK 包绕过 policy 加载流程 — 必须经 `policy.Load` / `policy.LoadOrDefault`。
 - **NEVER** 让 SDK 包暴露 `internal/` 防护(已迁出的包就是公开面,不要再加 `internal/` 子目录)。

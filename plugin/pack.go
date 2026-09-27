@@ -231,8 +231,18 @@ func writeZip(outPath string, entries []packEntry, m *Manifest) error {
 				return fmt.Errorf("无法读取 %s: %w", src, err)
 			}
 			defer f.Close()
-			_, err = io.Copy(w, f)
-			return err
+			// TOCTOU 防线:checksums 是此前独立一遍磁盘读算出的;若文件在
+			// "算摘要"与"写 zip"之间被改,zip 会带上新内容而 manifest 记着旧
+			// 摘要——产出一个自洽承诺之外的包。写出时边拷边哈希,与 manifest
+			// 记录不符即失败(fail-closed,宁可报错不出不一致包)。
+			h := sha256.New()
+			if _, err := io.Copy(io.MultiWriter(w, h), f); err != nil {
+				return fmt.Errorf("写入 zip 条目 %s 失败: %w", e.name, err)
+			}
+			if got := "sha256:" + hex.EncodeToString(h.Sum(nil)); got != m.Checksums[e.name] {
+				return fmt.Errorf("%s 在打包期间被修改(摘要 %s,现值 %s),拒绝产出不一致的包", src, m.Checksums[e.name], got)
+			}
+			return nil
 		}); err != nil {
 			out.Close()
 			return err

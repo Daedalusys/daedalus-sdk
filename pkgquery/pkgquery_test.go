@@ -76,6 +76,12 @@ func TestSanitize_RejectsInjectionAndEmpty(t *testing.T) {
 		{"/etc/shadow", "Invalid package name or pattern: /etc/shadow"},
 		{"a\x00b", "Invalid package name or pattern: a\x00b"},
 		{"back`tick", "Invalid package name or pattern: back`tick"},
+		// 前导 `-` 守门:合法包名语法不存在前导中划线,`--queryall`/`-qa` 之类
+		// 会被 rpm/dnf 解析成选项旗标(argv 注入),必须在源头拒绝,
+		// 且配合 exec 处的 `--` 分隔符构成双保险。
+		{"-erase", "Invalid package name or pattern: -erase"},
+		{"--queryall", "Invalid package name or pattern: --queryall"},
+		{"-qa *", "Invalid package name or pattern: -qa *"},
 	}
 	for _, tc := range cases {
 		_, err := sanitizeQuery(tc.in)
@@ -108,7 +114,7 @@ func TestDnfQuery_RpmHitWhenInstalled(t *testing.T) {
 		t.Errorf("结果 = %q, want %q(strip 后逐字)", got, want)
 	}
 	// argv 直发、无 shell 包装:精确断言。
-	r.wantCalls(t, []string{"rpm", "-q", "--info", "bash"})
+	r.wantCalls(t, []string{"rpm", "-q", "--info", "--", "bash"})
 }
 
 func TestDnfQuery_FallbackToDnfWhenRpmMiss(t *testing.T) {
@@ -126,8 +132,8 @@ func TestDnfQuery_FallbackToDnfWhenRpmMiss(t *testing.T) {
 	}
 	// 回退序列:rpm 先、dnf 后,argv 逐字。
 	r.wantCalls(t,
-		[]string{"rpm", "-q", "--info", "nope"},
-		[]string{"dnf", "repoquery", "--info", "nope"},
+		[]string{"rpm", "-q", "--info", "--", "nope"},
+		[]string{"dnf", "repoquery", "--info", "--", "nope"},
 	)
 }
 
@@ -143,8 +149,8 @@ func TestDnfQuery_FallbackWhenRpmZeroButEmptyStdout(t *testing.T) {
 		t.Errorf("零码空输出未触发回退: got %q", got)
 	}
 	r.wantCalls(t,
-		[]string{"rpm", "-q", "--info", "zsh"},
-		[]string{"dnf", "repoquery", "--info", "zsh"},
+		[]string{"rpm", "-q", "--info", "--", "zsh"},
+		[]string{"dnf", "repoquery", "--info", "--", "zsh"},
 	)
 }
 
@@ -185,7 +191,7 @@ func TestDnfQuery_RpmSpawnErrorSkipsDnfFallback(t *testing.T) {
 	if !strings.HasPrefix(got, "Error executing rpm query: ") || !strings.Contains(got, "rpm") {
 		t.Errorf("rpm 启动失败串 = %q, want 前缀 %q", got, "Error executing rpm query: ")
 	}
-	r.wantCalls(t, []string{"rpm", "-q", "--info", "bash"}) // 仅一次,无 dnf
+	r.wantCalls(t, []string{"rpm", "-q", "--info", "--", "bash"}) // 仅一次,无 dnf
 }
 
 func TestDnfQuery_DnfSpawnError(t *testing.T) {
@@ -199,8 +205,8 @@ func TestDnfQuery_DnfSpawnError(t *testing.T) {
 		t.Errorf("dnf 启动失败串 = %q, want 前缀 %q", got, "Error executing dnf repoquery: ")
 	}
 	r.wantCalls(t,
-		[]string{"rpm", "-q", "--info", "bash"},
-		[]string{"dnf", "repoquery", "--info", "bash"},
+		[]string{"rpm", "-q", "--info", "--", "bash"},
+		[]string{"dnf", "repoquery", "--info", "--", "bash"},
 	)
 }
 
@@ -229,7 +235,7 @@ func TestDnfListInstalled_SortsStripsAndDropsBlanks(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("列表 = %v, want %v", got, want)
 	}
-	r.wantCalls(t, []string{"rpm", "-qa", "*"})
+	r.wantCalls(t, []string{"rpm", "-qa", "--", "*"})
 }
 
 func TestDnfListInstalled_EmptyOutputReturnsEmptyList(t *testing.T) {

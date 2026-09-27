@@ -92,6 +92,30 @@ func TestPackVerifyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestWriteZip_DetectsMidPackMutation 锁定 TOCTOU 防线:manifest 里的
+// checksums 来自打包前一遍读盘;若写 zip 时磁盘内容已变(摘要对不上),
+// writeZip 必须 fail-closed 报错,绝不产出"manifest 承诺 A、zip 装着 B"
+// 的不一致包。此处用错摘要直接模拟两遍读之间的改动。
+func TestWriteZip_DetectsMidPackMutation(t *testing.T) {
+	src := writeMinimalPlugin(t, "")
+	m := validManifest()
+	m.Executable = "bin/main"
+	m.Checksums = map[string]string{
+		"bin/main":        Sha256Hex([]byte("STALE-FROM-BEFORE-RACE")),
+		"share/notes.txt": Sha256Hex([]byte("resource\n")),
+		ManifestFileName:  Sha256Hex([]byte("placeholder")),
+	}
+	entries := []packEntry{
+		{name: "bin/main", path: filepath.Join(src, "bin", "main"), mode: 0o755},
+		{name: "share/notes.txt", path: filepath.Join(src, "share", "notes.txt"), mode: 0o644},
+	}
+	out := filepath.Join(t.TempDir(), "x.zip")
+	err := writeZip(out, entries, m)
+	if err == nil || !strings.Contains(err.Error(), "打包期间被修改") {
+		t.Errorf("摘要漂移应被拒, 得到: %v", err)
+	}
+}
+
 // TestPackDeterministic 证明同输入两次打包产出逐字节相同的 zip(固定时间戳)。
 func TestPackDeterministic(t *testing.T) {
 	src := writeMinimalPlugin(t, "")
