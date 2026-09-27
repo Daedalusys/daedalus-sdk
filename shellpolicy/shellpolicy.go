@@ -47,7 +47,7 @@ func DefaultPostCheckAllowCommands() map[string]struct{} {
 	return stringSet(defaultPostCheckCommands)
 }
 
-// PostCheckAllowCommands 是 post_check / pre_check 脚本可执行命令的白名单,
+// PostCheckAllowCommands 是蓝图 post_check 脚本可执行命令的白名单,
 // 与主白名单 DefaultAllowCommands 相互独立(主白名单管 shell 能力服务器的只读
 // /诊断命令,本集只管蓝图 post_check 沙箱)。经 WithPolicy 注入
 // [blueprints].post_check_commands 后为运行时镜像(同源 policy.toml)。
