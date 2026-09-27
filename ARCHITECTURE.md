@@ -13,24 +13,29 @@ Go 编译器的"同模块限可见"防护随之失效。安全边界因此从编
 
 ## Package Index
 
-| Package | Purpose | Consumers |
+| Package | Purpose | Consumers (非测试 import 实测) |
 |---------|---------|-----------|
-| `objectmodel` | Resource model types (Kind, Resource, Object, Condition),对象模型 schema 单一事实源 | core, plugins |
-| `policy` | Policy engine (policy.toml loading, validation),严格加载与 fail-closed 默认值 | core |
-| `audit` | SHA-256 hash chain audit logging,与 Python 参考实现字节级兼容 | core |
-| `state` | JSONL state cache (append-only, latest-value),观测态派生缓存 | core |
-| `plugin` | Plugin manifest parsing and validation,Pack/Extract/Verify 与 zip-slip 防线 | core, plugins |
-| `pathguard` | Filesystem path sandboxing (symlink resolution, deny-list),前缀边界 + realpath | plugins (fs, shell, blueprint) |
-| `shellpolicy` | Shell command policy (allow/deny patterns),15 命令 / 4 bin 目录权威实现 | plugins (shell) |
-| `pkgquery` | Package manager abstraction (DNF),rpm 优先、dnf repoquery 兜底 | plugins (pkg) |
-| `sysinfo` | System information collection,os-release / cpuinfo / meminfo / 网络只读探测 | plugins (sysinfo) |
-| `dirs` | XDG directory resolution,state/tx 根路径统一解析链 | plugins |
-| `blueprint` | Blueprint type definitions,schema 校验 + 渲染 + confirm_token | plugins (blueprint) |
-| `i18n` | Internationalization (P1 - not yet implemented),locale 文件与 `t(key, ...args)` | core, plugins |
-| `version` | Semantic versioning,版本常量与构建信息 | core |
-| `slot` | Provider/Slot vocabulary (Swappability levels),共享 Level 枚举 | core |
-| `secretprovider` | SecretProvider contract (`secret://` references),引用不持明文 | core |
-| `memoryprovider` | MemoryProvider contract (cross-session memory),scope 封闭枚举 + TTL | core |
+| `objectmodel` | Resource model types (Kind, Resource, Object, Condition),对象模型 schema 单一事实源 | core (`internal/controller`, `internal/desiredview`), plugins (`service`), sdk (`plugin`) |
+| `policy` | Policy engine (policy.toml loading, validation),严格加载与 fail-closed 默认值 | plugins (`fs`, `shell`, `blueprint`, `dupe`), sdk (`shellpolicy`);**core 不 import 本包**(core 只经 `76-*.sh` 做构建期握手) |
+| `audit` | SHA-256 hash chain audit logging,与 Python 参考实现字节级兼容 | core (`cmd/daedalus-{audit,host,tx}`), plugins (`shell`, `blueprint`;`trace` 只读回放) |
+| `state` | JSONL state cache (append-only, latest-value),观测态派生缓存 | plugins (`service`) |
+| `plugin` | Plugin manifest parsing and validation,Pack/Extract/Verify 与 zip-slip 防线 | core (`cmd/daedalus-{host,plugin-pack}`);plugins 不 import |
+| `pathguard` | Filesystem path sandboxing (symlink resolution, deny-list),前缀边界 + realpath | plugins (`fs`, `dupe`);`shell`/`blueprint` 不 import |
+| `shellpolicy` | Shell command policy (allow/deny patterns),15 命令 / 4 bin 目录权威实现 | plugins (`shell`, `blueprint`(post_check 白名单)) |
+| `pkgquery` | Package manager abstraction (DNF),rpm 优先、dnf repoquery 兜底 | core (`cmd/daedalus-tx/package_set.go`), plugins (`pkg`) |
+| `sysinfo` | System information collection,os-release / cpuinfo / meminfo / 网络只读探测 | plugins (`sysinfo`) |
+| `dirs` | XDG directory resolution,state/tx 根路径统一解析链 | core (`cmd/daedalus-tx`, `internal/tx` 共 3 处), sdk (`state`) |
+| `blueprint` | Blueprint type definitions,schema 校验 + 渲染 + confirm_token | plugins (`blueprint`) |
+| `i18n` | Internationalization (P1 - not yet implemented),locale 文件与 `t(key, ...args)` | core (`cmd/daedalus-host` 3 处);plugins 侧尚未接线 |
+| `version` | Semantic versioning,版本常量与构建信息 | core, plugins (全部 9 个 cap) |
+| `slot` | Provider/Slot vocabulary (Swappability levels),共享 Level 枚举 | sdk (`secretprovider`, `memoryprovider`);core/plugins 暂无消费者 |
+| `secretprovider` | SecretProvider contract (`secret://` references),引用不持明文 | 暂无消费者(契约缝,接线归装配构造期) |
+| `memoryprovider` | MemoryProvider contract (cross-session memory),scope 封闭枚举 + TTL | 暂无消费者(契约缝,接线归装配构造期) |
+
+> **Consumers 列的口径与重算方式**:只统计非 `*_test.go` 的 import;测试引用不计,
+> 否则会出现 policy↔shellpolicy 这类由 `*_test.go` 造成的假依赖。重算:
+> `grep -rl 'daedalus-sdk/<pkg>"' ../daedalus-core ../daedalus-plugins --include='*.go' | grep -v _test.go`
+> —— 三仓平级检出下直接跑,别手写这张表。
 
 另有 3 个 Provider/Slot 占位目录(`modelprovider/`、`agentprovider/`、
 `transportprovider/`),形态是空目录 + README,尚无 Go 代码,见下文
@@ -76,7 +81,8 @@ SDK 只定义规则,不强制规则。运行时强制归消费方进程的 syste
   `Resource.Object()` 与 `ServiceState.Object()` 提供双投影。
 - `Condition`: three-state(`True` / `False` / `Unknown`)带时间戳,经
   `UpsertCondition` 写入 status,`MatchLabels` 做读侧匹配。
-- `ServiceState`: 服务观测态容器(`kind`/`name`/`properties`/`conditions`),
+- `ServiceState`: 服务观测态容器(`kind`/`name`/`desired_state`/`properties`/`conditions`,
+  见 `objectmodel.go:76-82`;查询结果里 `desired_state` 可为空 —— 观测态无期望),
   `Properties` 键保留 systemctl 属性名原文,与 `state.jsonl` 共用 payload 形状;
   core 侧 `internal/controller` 的同名类型是本包别名。
 - 新增 Kind 是三处联动:`objectmodel` 常量 + `kindRegistry` + 校验分支,
