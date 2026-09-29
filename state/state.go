@@ -1,8 +1,8 @@
-// Package state 实现 C4 机器状态记忆:state.jsonl 追加式(append-only)观测缓存。
+// Package state 实现机器状态记忆:state.jsonl 追加式(append-only)观测缓存。
 //
 // 职责与审计链分离:audit = 证据层(哈希链、防篡改、每步留痕);state = 派生
 // 缓存(容错读取,损坏/丢失只意味缓存重建,不构成证据缺口)。解析路径唯一委托
-// dirs.StateFile() 不复制;v1 KNOWN LIMITATION 见 dirs 包文档。并发协议与
+// dirs.StateFile() 不复制;v1 已知限制见 dirs 包文档。并发协议与
 // audit.LogAudit 同源:O_APPEND → flock(LOCK_EX) → 追加写 → Sync → LOCK_UN
 // (defer LIFO 先解锁后关闭),锁在文件自身 fd 上,保证单行完整追加、无交错丢失。
 package state

@@ -1,4 +1,4 @@
-// Package slot 是 Provider/Slot 架构(daedalus-sdk#2)的共享词汇:
+// Package slot 是 Provider/Slot 架构的共享词汇:
 // 只定义可拔插分级枚举,不含注册表/分发器/装配逻辑——Core 持有接口,
 // provider 接线发生在消费方 cmd/daemon 的构造期(镜像即完整清单)。
 //
@@ -6,8 +6,7 @@
 // (L0/L1/L2 风险档)是两套正交词汇,token 形状虽同为 Ln,含义不得互引。
 package slot
 
-// Level 是 provider 自行声明的 swappability 上限,采用 issue #42 原生
-// Ln token,逐字节冻结。
+// Level 是 provider 自行声明的 swappability 上限,采用原生 Ln token,逐字节冻结。
 type Level string
 
 // 分级全集(语义详见 docs/provider-slot.md §1):

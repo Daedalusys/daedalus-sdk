@@ -120,11 +120,9 @@ func TestParseManifest_Resources(t *testing.T) {
 
 // TestValidate_OfficialPluginManifests 向后兼容硬断言:仓库内官方插件
 // manifest 源文件(9 个能力插件在 daedalus-plugins/,copilot 留主仓
-// daedalus-core/plugin/copilot/)必须能被 ParseManifest 读取,且:
-//   - 9 个能力插件(已升级 C1 schema,含 api_version/license/maintainer
-//     与 runtime 对象)必须通过 Validate;
-//   - copilot manifest(明确不改)仍缺新必填字段,Validate 必须被拒——
-//     证明校验器能读老清单但要求新字段。
+// daedalus-core/plugin/copilot/)必须能被 ParseManifest 读取并通过
+// Validate——含 copilot 在内全部清单已升级 C1 schema(api_version/
+// license/maintainer 与 runtime 字段齐备)。
 //
 // 执行点不在本仓 CI:相对路径 ../../daedalus-plugins 落在 GITHUB_WORKSPACE
 // 之外,Actions 不允许 checkout 逃到那里,所以 SDK 单独跑必然缺兄弟仓。兄弟根
@@ -136,20 +134,17 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 	if _, err := os.Stat(pluginsRoot); err != nil {
 		t.Skipf("兄弟仓未检出(%s 不存在);本校验由 daedalus-core test job 执行", pluginsRoot)
 	}
-	ids := []struct {
-		id, dir   string
-		wantValid bool
-	}{
-		{"fs", filepath.Join(pluginsRoot, "fs"), true},
-		{"shell", filepath.Join(pluginsRoot, "shell"), true},
-		{"pkg", filepath.Join(pluginsRoot, "pkg"), true},
-		{"sysinfo", filepath.Join(pluginsRoot, "sysinfo"), true},
-		{"service", filepath.Join(pluginsRoot, "service"), true},
-		{"blueprint", filepath.Join(pluginsRoot, "blueprint"), true},
-		{"dupe", filepath.Join(pluginsRoot, "dupe"), true},
-		{"trace", filepath.Join(pluginsRoot, "trace"), true},
-		{"proc", filepath.Join(pluginsRoot, "proc"), true},
-		{"copilot", filepath.Join("..", "..", "daedalus-core", "plugin", "copilot"), false},
+	ids := []struct{ id, dir string }{
+		{"fs", filepath.Join(pluginsRoot, "fs")},
+		{"shell", filepath.Join(pluginsRoot, "shell")},
+		{"pkg", filepath.Join(pluginsRoot, "pkg")},
+		{"sysinfo", filepath.Join(pluginsRoot, "sysinfo")},
+		{"service", filepath.Join(pluginsRoot, "service")},
+		{"blueprint", filepath.Join(pluginsRoot, "blueprint")},
+		{"dupe", filepath.Join(pluginsRoot, "dupe")},
+		{"trace", filepath.Join(pluginsRoot, "trace")},
+		{"proc", filepath.Join(pluginsRoot, "proc")},
+		{"copilot", filepath.Join("..", "..", "daedalus-core", "plugin", "copilot")},
 	}
 	for _, tc := range ids {
 		t.Run("daedalus."+tc.id, func(t *testing.T) {
@@ -166,22 +161,8 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 			if m.Runtime.Name == "" {
 				t.Fatalf("官方 manifest runtime 未解析: %+v", m.Runtime)
 			}
-			err = m.Validate()
-			if tc.wantValid {
-				// 能力插件 manifest 已升级(含 api_version/license/maintainer)
-				if err != nil {
-					t.Fatalf("官方 manifest 应通过校验: %v", err)
-				}
-			} else {
-				// copilot manifest 未升级,缺新必填字段,Validate 必须报缺失而非崩溃
-				if err == nil {
-					t.Fatalf("copilot manifest 缺 api_version/license/maintainer 应被拒")
-				}
-				if !strings.Contains(err.Error(), "api_version") &&
-					!strings.Contains(err.Error(), "license") &&
-					!strings.Contains(err.Error(), "maintainer") {
-					t.Fatalf("拒绝原因应含新必填字段,got %v", err)
-				}
+			if err := m.Validate(); err != nil {
+				t.Fatalf("官方 manifest 应通过校验: %v", err)
 			}
 		})
 	}

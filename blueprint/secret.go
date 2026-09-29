@@ -6,13 +6,13 @@ import (
 )
 
 // ErrSecretSourceUnavailable 是 v1 真值获取未接入时的统一错误。kwallet /
-// credstore 的 D-Bus / LoadCredential 接入见 issue #033/#034;v1 只做引用校验 +
+// credstore 的 D-Bus / LoadCredential 真值获取为后续接入项;v1 只做引用校验 +
 // 明确的"源不可用"错误(fail-closed:宁可拒绝,也不静默跳过或降级为明文)。
-var ErrSecretSourceUnavailable = errors.New("blueprint: secret 源不可用(真值获取未接入,kwallet/credstore 接入归 #033/#034)")
+var ErrSecretSourceUnavailable = errors.New("blueprint: secret 源不可用(真值获取未接入,kwallet/credstore 待后续接入)")
 
 // resolveKwallet 是 kwallet 真值获取的函数缝(注入点)。
 //
-// v1 恒返回 ErrSecretSourceUnavailable;#033 接入 D-Bus 后在此替换实现。
+// v1 恒返回 ErrSecretSourceUnavailable;D-Bus 接入后在此替换实现。
 // 用函数变量而非接口,是为了让测试能直接注入假实现验证 happy path,
 // 同时保持包级零依赖。
 var resolveKwallet func(path string) (string, error) = func(path string) (string, error) {

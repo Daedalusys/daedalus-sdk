@@ -4,7 +4,7 @@
 // 适配器路径守卫无条件强制。
 // 解析链:env 覆盖(必须绝对路径)→ 系统探测 → $HOME 兜底 → 显式错误;
 // 全部候选不可用返回 ErrNoUsablePath,绝不静默回落到 "/"。
-// KNOWN LIMITATION:宿侧 state 被 DynamicUser 隔离于 /var/lib/private/daedalus,
+// 已知限制:宿侧 state 被 DynamicUser 隔离于 /var/lib/private/daedalus,
 // 用户态不可见;v1 状态记忆按上下文隔离,禁止命名空间逃逸 hack。
 package dirs
 
@@ -21,7 +21,7 @@ const (
 	// EnvStatePath 覆盖状态记忆文件路径;值必须绝对路径。
 	EnvStatePath = "DAEDALUS_STATE_PATH"
 
-	// TxSystemDir 是镜像内事务日志根目录(单元侧写入按 KNOWN LIMITATION 隔离于上下文)。
+	// TxSystemDir 是镜像内事务日志根目录(单元侧写入按上述已知限制隔离于上下文)。
 	TxSystemDir = "/var/lib/daedalus/tx"
 	TxHomeRel   = ".local/share/daedalus/tx"
 
