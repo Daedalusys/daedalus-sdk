@@ -70,7 +70,9 @@ type ApplyResult struct {
 // 单次有效的确认令牌:apply 前必须由用户提供,与 plan_id 配对校验。
 type ConfirmToken struct {
 	// Token 单次有效,校验通过后即失效。
-	Token  string
+	Token string
+	// PlanID/Expires 是对外展示形态;校验依据是 SDK 签发登记表
+	// (confirm_token.go),自报字段既不能伪造配对也不能放宽有效期。
 	PlanID string
 	// Expires 是 Unix 毫秒过期时间。
 	Expires int64

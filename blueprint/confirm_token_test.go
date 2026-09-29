@@ -50,15 +50,31 @@ func TestConfirmToken_Empty(t *testing.T) {
 	}
 }
 
-// TestConfirmToken_ExpiresZeroAllowed 验证 Expires==0(未设过期)的令牌按未过期处理。
-//
-// 这是契约的宽松分支:Expires 是可选字段,0 表示"不设过期"而非"已过期",
-// 避免旧调用方构造的令牌被误判。已消费 / planID 不匹配等硬约束不受影响。
-func TestConfirmToken_ExpiresZeroAllowed(t *testing.T) {
-	tok := GenerateConfirmToken("plan-zero")
-	tok.Expires = 0 // 显式清零,模拟未设过期。
+// TestConfirmToken_UnissuedRejected 是守门测试:
+// 未经 GenerateConfirmToken 签发的令牌(凭空伪造的串,含 Expires==0
+// "永不过期"形态)必须被拒——校验只认签发登记表,不采信自报字段。
+func TestConfirmToken_UnissuedRejected(t *testing.T) {
+	forged := ConfirmToken{Token: "deadbeef", PlanID: "x", Expires: 0}
+	if err := VerifyConfirmToken("x", forged); err == nil {
+		t.Fatal("伪造的未签发令牌通过了校验")
+	}
+}
 
-	if err := VerifyConfirmToken("plan-zero", tok); err != nil {
-		t.Fatalf("VerifyConfirmToken 返回错误,期望 Expires==0 视为未过期: %v", err)
+// TestConfirmToken_SelfReportedCannotExtend 验证自报 Expires 不能放宽有效期:
+// 签发记录内(未过期)的令牌,自报一个已过去的 Expires 必须判过期被拒;
+// 自报 0 则回落到签发记录的过期时刻,不存在"不设过期"特权。
+func TestConfirmToken_SelfReportedCannotExtend(t *testing.T) {
+	tok := GenerateConfirmToken("plan-zero")
+
+	early := tok
+	early.Expires = time.Now().Add(-time.Minute).UnixMilli()
+	if err := VerifyConfirmToken("plan-zero", early); err == nil {
+		t.Fatal("自报已过期时刻的令牌通过了校验")
+	}
+
+	zero := tok
+	zero.Expires = 0 // 自报 0 不是永不过期,也不是豁免:按签发记录判定。
+	if err := VerifyConfirmToken("plan-zero", zero); err != nil {
+		t.Fatalf("签发记录未过期的令牌应通过(自报 0 回落记录值): %v", err)
 	}
 }
