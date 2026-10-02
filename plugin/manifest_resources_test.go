@@ -1,5 +1,5 @@
 // manifest.go resources 字段的专项测试:接受面/拒绝面/JSON 边界,
-// 以及对仓库内 9 个官方插件 manifest 源文件的向后兼容硬断言。
+// 以及对仓库内 17 个官方插件 manifest 源文件的向后兼容硬断言。
 package plugin
 
 import (
@@ -119,9 +119,9 @@ func TestParseManifest_Resources(t *testing.T) {
 }
 
 // TestValidate_OfficialPluginManifests 向后兼容硬断言:仓库内官方插件
-// manifest 源文件(9 个能力插件在 daedalus-plugins/,copilot 留主仓
+// manifest 源文件(17 个能力插件在 daedalus-plugins/,copilot 留主仓
 // daedalus-core/plugin/copilot/)必须能被 ParseManifest 读取,且:
-//   - 9 个能力插件(已升级 C1 schema,含 api_version/license/maintainer
+//   - 17 个能力插件(已升级 C1 schema,含 api_version/license/maintainer
 //     与 runtime 对象)必须通过 Validate;
 //   - copilot manifest(明确不改)仍缺新必填字段,Validate 必须被拒——
 //     证明校验器能读老清单但要求新字段。
@@ -149,6 +149,14 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 		{"dupe", filepath.Join(pluginsRoot, "dupe"), true},
 		{"trace", filepath.Join(pluginsRoot, "trace"), true},
 		{"proc", filepath.Join(pluginsRoot, "proc"), true},
+		{"hwmon", filepath.Join(pluginsRoot, "hwmon"), true},
+		{"journal", filepath.Join(pluginsRoot, "journal"), true},
+		{"triage", filepath.Join(pluginsRoot, "triage"), true},
+		{"integrity", filepath.Join(pluginsRoot, "integrity"), true},
+		{"avc", filepath.Join(pluginsRoot, "avc"), true},
+		{"gpu", filepath.Join(pluginsRoot, "gpu"), true},
+		{"smart", filepath.Join(pluginsRoot, "smart"), true},
+		{"search", filepath.Join(pluginsRoot, "search"), true},
 		{"copilot", filepath.Join("..", "..", "daedalus-core", "plugin", "copilot"), false},
 	}
 	for _, tc := range ids {
