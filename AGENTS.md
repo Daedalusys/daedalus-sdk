@@ -15,8 +15,9 @@ SecretProvider/MemoryProvider contract 包(daedalus-sdk#2 填实)+ 3 个 Provide
 ```
 daedalus-sdk/                          # module github.com/Daedalusys/daedalus-sdk
 ├── audit/         # 哈希链审计库 (Python 金样字节级兼容)
+├── confirmation/  # 通用单次性确认令牌 (confirm_token 契约缝; blueprint/disk-clean/organize 共用)
 ├── policy/        # policy.toml 严格加载 (ErrNotFound 哨兵 / Default / ALLOW_COMMANDS REPLACE)
-├── pathguard/     # fs 路径校验 (ALLOWED_DIRS 前缀边界 / 空字节 / realpath)
+├── pathguard/     # fs 路径校验 (读 ValidatePath + 写二档 ValidateWritePath)
 ├── shellpolicy/   # 15 命令 / 4 bin 目录 / 路径规则权威实现
 ├── pkgquery/      # dnf/rpm 只读查询 (rpm 优先 / dnf repoquery 兜底)
 ├── sysinfo/       # os-release / cpuinfo / meminfo / 网络只读探测
@@ -39,8 +40,9 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 | Task | Location | Notes |
 |------|----------|-------|
 | 哈希链审计实现 / 金样向量 | `audit/` | Python 金样字节级兼容;`testdata/golden.jsonl` 重放 |
+| 单次性确认令牌 | `confirmation/` | `GenerateConfirmToken` / `VerifyConfirmToken`;15 分钟过期;blueprint 薄包装保留 |
 | 策略加载与默认值 | `policy/` | 三点防漂移链:policy.toml ↔ `policy.Default()` ↔ shellpolicy/pathguard 常量 |
-| fs 路径白名单边界 | `pathguard/` | 防 `/home` 匹配 `/home2` (前缀边界 + realpath) |
+| fs 路径白名单边界 | `pathguard/` | 防 `/home` 匹配 `/home2` (前缀边界 + realpath);写二档 `ValidateWritePath` 额外拒写只读系统目录 + 敏感文件 |
 | Shell 白名单与 argv 规则 | `shellpolicy/` | 15 命令 / 4 bin 目录;`RegisterBlueprintsPostCheckSource` 钩子 |
 | 插件 manifest + zip 打包 | `plugin/` | schema 校验 + zip-slip 九道防线 + checksums 注入 |
 | 对象模型类型 + Kind 注册 | `objectmodel/` | `Kind` 封闭枚举 + `kindRegistry`;新增 Kind 三步走 |
@@ -54,9 +56,10 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 |--------------------|----------|------|
 | `audit.Hashtx` / `audit.Append` | `audit/hashtx.go` | sha256 链 + syscall.Flock (LOCK_UN before Close via defer LIFO) |
 | `audit.Verify` / `audit.Scan` | `audit/verify.go` `audit/scan.go` | 哈希链验证 / 扫描 |
-| `policy.Load` / `policy.Default` | `policy/policy.go` | 严格加载 / 缺失默认 fail-closed 拒启(回退 Default 需 `DAEDALUS_POLICY_MODE=development` opt-in,drift-tested 一致) |
+| `confirmation.ConfirmToken` / `GenerateConfirmToken` / `VerifyConfirmToken` | `confirmation/token.go` | 单次有效确认令牌;TTL=15 分钟;blueprint / disk-clean / organize 共用契约 |
+| `policy.Load` / `policy.Default` | `policy/policy.go` | 严格加载 / 缺失默认 fail-closed 拒启(回退 Default 需 `DAEDALUS_POLICY_MODE=development` opt-in,drift-tested 一致);含 `[confirmation]` + `[diskclean]` 段 |
 | `shellpolicy.AllowCommands` | `shellpolicy/allow.go` | 15 命令权威实现;CLEAN_ENV + 30s + rc 126/124 |
-| `pathguard.Validate` | `pathguard/validate.go` | ALLOWED_DIRS 前缀 + realpath 防逃逸 |
+| `pathguard.ValidatePath` / `pathguard.ValidateWritePath` | `pathguard/pathguard.go` | 读档校验(ALLOWED_DIRS 前缀 + realpath 防逃逸);写档二档额外拒写只读系统目录(`/proc`/`/sys`/`/boot`/`/usr`/`/etc`/`/var/lib/rpm`)+ 敏感文件通配(`/etc/shadow`/`/etc/passwd`/`/etc/sudoers*`/`/etc/pam.d/`)+ 强制完整 realpath |
 | `plugin.Manifest` / `plugin.Pack` | `plugin/manifest.go` `plugin/pack.go` | 规范化自摘要 + 逐条目 sha256 + zip-slip 防线 |
 | `objectmodel.Resource` / `Kind` | `objectmodel/objectmodel.go` | 三字段元组 (kind/name/desired_state);Kind 封闭枚举 7 类 |
 | `objectmodel.Object` / `Condition` | `objectmodel/envelope.go` | spec/status 信封;`Resource.Object()` 与 `ServiceState.Object()` 双投影,`UpsertCondition`/`MatchLabels` 读写侧 API;`internal/controller` 的同名类型是本包别名 |

@@ -580,4 +580,78 @@ func assertPolicyEqual(t *testing.T, got, want *policy.Policy, label string) {
 	if !eqList(got.Blueprints.SecretSources, want.Blueprints.SecretSources) {
 		t.Errorf("%s: blueprints.secret_sources 漂移 %v vs %v", label, got.Blueprints.SecretSources, want.Blueprints.SecretSources)
 	}
+	if !eqList(got.DiskClean.AllowedWriteDirs, want.DiskClean.AllowedWriteDirs) {
+		t.Errorf("%s: diskclean.allowed_write_dirs 漂移 %v vs %v", label, got.DiskClean.AllowedWriteDirs, want.DiskClean.AllowedWriteDirs)
+	}
+	if got.DiskClean.OldKernelDirPattern != want.DiskClean.OldKernelDirPattern {
+		t.Errorf("%s: diskclean.old_kernel_dir_pattern 漂移 %q vs %q", label, got.DiskClean.OldKernelDirPattern, want.DiskClean.OldKernelDirPattern)
+	}
+	if got.Confirmation.TTLSeconds != want.Confirmation.TTLSeconds {
+		t.Errorf("%s: confirmation.ttl_seconds 漂移 %d vs %d", label, got.Confirmation.TTLSeconds, want.Confirmation.TTLSeconds)
+	}
+	if got.Confirmation.MaxPendingTokens != want.Confirmation.MaxPendingTokens {
+		t.Errorf("%s: confirmation.max_pending_tokens 漂移 %d vs %d", label, got.Confirmation.MaxPendingTokens, want.Confirmation.MaxPendingTokens)
+	}
+}
+
+// TestPolicy_DefaultHasConfirmationSection 锁定 Default() 的 [confirmation]
+// 段值:ttl_seconds 必须 = 900(与 confirmation.ConfirmTokenTTL 默认 15 分钟对齐),
+// max_pending_tokens = 1000 是单进程未消费令牌上限的文档化基线。
+func TestPolicy_DefaultHasConfirmationSection(t *testing.T) {
+	d := policy.Default()
+	if d.Confirmation.TTLSeconds != 900 {
+		t.Errorf("Default().Confirmation.TTLSeconds = %d, want 900", d.Confirmation.TTLSeconds)
+	}
+	if d.Confirmation.MaxPendingTokens != 1000 {
+		t.Errorf("Default().Confirmation.MaxPendingTokens = %d, want 1000", d.Confirmation.MaxPendingTokens)
+	}
+}
+
+// TestPolicy_DefaultHasDiskCleanSection 锁定 Default() 的 [diskclean] 段值:
+// allowed_write_dirs 至少含 /var/log/journal + /var/cache/dnf + /var/lib/systemd/coredump
+// (issue #1 数据源三大类);old_kernel_dir_pattern 必须 = "/boot"。
+func TestPolicy_DefaultHasDiskCleanSection(t *testing.T) {
+	d := policy.Default()
+	required := []string{"/var/log/journal", "/var/cache/dnf", "/var/lib/systemd/coredump"}
+	for _, r := range required {
+		if !slices.Contains(d.DiskClean.AllowedWriteDirs, r) {
+			t.Errorf("Default().DiskClean.AllowedWriteDirs 缺必需路径 %q", r)
+		}
+	}
+	if d.DiskClean.OldKernelDirPattern != "/boot" {
+		t.Errorf("Default().DiskClean.OldKernelDirPattern = %q, want /boot", d.DiskClean.OldKernelDirPattern)
+	}
+}
+
+// TestPolicy_Confirmation_DiskClean_DriftWithRealToml 是 confirmation + diskclean
+// 段的镜像 policy.toml 三点漂移测试:解析仓库真实 policy.toml,与 Default()
+// 逐字段一致。任何修改 policy.toml / Default() 单边的提交必须同步另一侧,
+// 否则此测试 fail-closed。
+func TestPolicy_Confirmation_DiskClean_DriftWithRealToml(t *testing.T) {
+	t.Setenv(policy.EnvPolicyPath, "")
+	st, err := os.Stat(policy.ProductionPath)
+	if err == nil && !st.IsDir() {
+		t.Skipf("本机存在 %s,无法演练开发态回溯", policy.ProductionPath)
+	}
+	repoPolicy, err := policy.ResolvePath()
+	if err != nil {
+		t.Fatalf("开发态回溯未命中仓库 policy.toml: %v", err)
+	}
+	real, err := policy.Load(repoPolicy)
+	if err != nil {
+		t.Fatalf("镜像 policy.toml 未通过自身校验(含 [confirmation]/[diskclean] 段): %v", err)
+	}
+	def := policy.Default()
+	if real.Confirmation.TTLSeconds != def.Confirmation.TTLSeconds {
+		t.Errorf("confirmation.ttl_seconds 漂移: %d vs %d", real.Confirmation.TTLSeconds, def.Confirmation.TTLSeconds)
+	}
+	if real.Confirmation.MaxPendingTokens != def.Confirmation.MaxPendingTokens {
+		t.Errorf("confirmation.max_pending_tokens 漂移: %d vs %d", real.Confirmation.MaxPendingTokens, def.Confirmation.MaxPendingTokens)
+	}
+	if !slices.Equal(real.DiskClean.AllowedWriteDirs, def.DiskClean.AllowedWriteDirs) {
+		t.Errorf("diskclean.allowed_write_dirs 漂移: %v vs %v", real.DiskClean.AllowedWriteDirs, def.DiskClean.AllowedWriteDirs)
+	}
+	if real.DiskClean.OldKernelDirPattern != def.DiskClean.OldKernelDirPattern {
+		t.Errorf("diskclean.old_kernel_dir_pattern 漂移: %q vs %q", real.DiskClean.OldKernelDirPattern, def.DiskClean.OldKernelDirPattern)
+	}
 }

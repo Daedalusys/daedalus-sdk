@@ -88,13 +88,33 @@ type Blueprints struct {
 	SecretSources []string `toml:"secret_sources"`
 }
 
+// Confirmation 对应 TOML [confirmation] 表:通用 confirm_token 单次性契约的
+// 全局参数。TTLSeconds 与 confirmation.ConfirmTokenTTL(15 分钟)对齐,
+// policy.toml 此处为文档/诊断参考;实际生效值在 confirmation 包内,改 TTL 必须
+// 改 confirmation 常量并跑 drift 测试。MaxPendingTokens 是单进程最大未消费
+// 令牌数(超限由 confirmation 包自行 purge),policy 仅文档化。
+type Confirmation struct {
+	TTLSeconds       int64 `toml:"ttl_seconds"`
+	MaxPendingTokens int64 `toml:"max_pending_tokens"`
+}
+
+// DiskClean 对应 TOML [diskclean] 表:daedalus.disk-clean 插件的写白名单与
+// 旧内核路径模板。AllowedWriteDirs 经 pathguard.ValidateWritePath 二档校验,
+// 消费方在插件 applyPolicy 阶段把它合并进 pathguard.AllowedDirs。
+type DiskClean struct {
+	AllowedWriteDirs    []string `toml:"allowed_write_dirs"`
+	OldKernelDirPattern string   `toml:"old_kernel_dir_pattern"`
+}
+
 // Policy 是 policy.toml 的完整解析结果。
 type Policy struct {
-	Shell       Shell       `toml:"shell"`
-	FS          FS          `toml:"fs"`
-	Audit       Audit       `toml:"audit"`
-	ObjectModel ObjectModel `toml:"objectmodel"`
-	Blueprints  Blueprints  `toml:"blueprints"`
+	Shell        Shell        `toml:"shell"`
+	FS           FS           `toml:"fs"`
+	Audit        Audit        `toml:"audit"`
+	ObjectModel  ObjectModel  `toml:"objectmodel"`
+	Blueprints   Blueprints   `toml:"blueprints"`
+	Confirmation Confirmation `toml:"confirmation"`
+	DiskClean    DiskClean    `toml:"diskclean"`
 }
 
 // ResolvePath 按文档优先级解析策略文件路径。
@@ -282,6 +302,26 @@ func Default() *Policy {
 			PostCheckCommands: []string{"nginx", "haproxy", "psql", "redis-cli", "systemctl", "grep"},
 			ReloadServices:    []string{"nginx", "haproxy", "postgresql", "redis"},
 			SecretSources:     []string{"kwallet", "credstore"},
+		},
+		// Confirmation 全局参数:TTL 与 confirmation.ConfirmTokenTTL 常量对齐,
+		// policy.toml 此处为文档/诊断参考;MaxPendingTokens 是单进程未消费
+		// 令牌上限(超限由 confirmation 包自行 purge)。
+		Confirmation: Confirmation{
+			TTLSeconds:       900, // 15 分钟,与 confirmation.ConfirmTokenTTL 默认值一致
+			MaxPendingTokens: 1000,
+		},
+		// DiskClean 写白名单:plugin 启动时经 pathguard.WithAllowedDirs
+		// 注入,与 [fs].allowed_dirs 是两层(全局 / 插件)关系。
+		DiskClean: DiskClean{
+			AllowedWriteDirs: []string{
+				"/var/log/journal",
+				"/var/cache/dnf",
+				"/var/cache/PackageKit",
+				"/var/lib/systemd/coredump",
+				"/var/tmp",
+				"/home",
+			},
+			OldKernelDirPattern: "/boot",
 		},
 	}
 }

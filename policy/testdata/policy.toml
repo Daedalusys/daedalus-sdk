@@ -77,3 +77,27 @@ reload_services = ["nginx", "haproxy", "postgresql", "redis"]
 
 # secret 引用解析来源(用户态)。
 secret_sources = ["kwallet", "credstore"]
+
+[confirmation]
+# confirm_token 单次性契约的全局参数(与 [shell]/[fs]/[audit]/[objectmodel]/[blueprints]
+# 并列的第六策略节):
+# 实际生效值在 `../daedalus-sdk/confirmation` 包内(confirmTokenTTL 常量),policy.toml
+# 此处为文档/诊断参考;改 TTL 必须改 confirmation 常量并跑 drift 测试。
+# ttl_seconds 必须与 confirmation.ConfirmTokenTTL 同步(900 = 15 分钟)。
+ttl_seconds = 900
+
+# 单进程未消费令牌上限;超限由 confirmation 包自行 purge 最早签发。
+max_pending_tokens = 1000
+
+[diskclean]
+# daedalus.disk-clean 插件(daedalus-plugins#1)的写白名单与旧内核路径模板:
+# 与 [fs].allowed_dirs 是两层(全局 / 插件)关系——插件启动时经
+# pathguard.WithAllowedDirs 把本节合并进全局 AllowedDirs。
+# 本节定义的是"插件可写"的上限(经 pathguard.ValidateWritePath 二档校验),
+# 真正的写盘仍需走 daedalus-tx 的 disk.clean 适配器(事务通道)。
+
+# 可写目录(issue #1 数据源:journal / dnf cache / PackageKit / coredump / 旧 /tmp)。
+allowed_write_dirs = ["/var/log/journal", "/var/cache/dnf", "/var/cache/PackageKit", "/var/lib/systemd/coredump", "/var/tmp", "/home"]
+
+# 旧内核路径模板(rpm -q kernel 解析后命中此前缀的目录视为"旧内核可清理")。
+old_kernel_dir_pattern = "/boot"
