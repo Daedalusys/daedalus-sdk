@@ -171,6 +171,115 @@ func TestValidatePath_MissingNestedWrite(t *testing.T) {
 	}
 }
 
+// TestValidateWritePath_RejectsProc 验证写操作拒绝伪文件系统 /proc。
+func TestValidateWritePath_RejectsProc(t *testing.T) {
+	got, err := ValidateWritePath("/proc/self/cmdline")
+	if err == nil {
+		t.Fatalf("写入 /proc/self/cmdline 被放行(解析为 %q)", got)
+	}
+	if !strings.Contains(err.Error(), "read-only system dir") {
+		t.Errorf("错误消息应指出只读系统目录,实得: %v", err)
+	}
+}
+
+// TestValidateWritePath_RejectsEtcShadow 验证写操作拒绝 /etc 下敏感文件。
+// (/etc 整体在只读系统目录清单内,纵深防御下先于 forbiddenWritePatterns 命中,
+// 两者都达到"拒绝"的安全目标。)
+func TestValidateWritePath_RejectsEtcShadow(t *testing.T) {
+	got, err := ValidateWritePath("/etc/shadow")
+	if err == nil {
+		t.Fatalf("写入 /etc/shadow 被放行(解析为 %q)", got)
+	}
+	if !strings.Contains(err.Error(), "write denied") {
+		t.Errorf("错误消息应含 write denied,实得: %v", err)
+	}
+}
+
+// TestValidateWritePath_ForbiddenPatternsIndependent 验证 forbiddenWritePatterns
+// 独立于 readOnlySystemDirs 生效:临时清空只读目录清单并把 AllowedDirs 设为 /etc,
+// 模拟"白名单被错配放宽"的纵深防御场景,/etc/shadow 仍必须在 forbiddenWritePatterns
+// 层被拒。
+func TestValidateWritePath_ForbiddenPatternsIndependent(t *testing.T) {
+	savedRO := readOnlySystemDirs
+	savedAllowed := AllowedDirs
+	readOnlySystemDirs = nil
+	AllowedDirs = []string{"/etc"}
+	t.Cleanup(func() {
+		readOnlySystemDirs = savedRO
+		AllowedDirs = savedAllowed
+	})
+
+	got, err := ValidateWritePath("/etc/shadow")
+	if err == nil {
+		t.Fatalf("白名单放宽后 /etc/shadow 仍应被 forbiddenWritePatterns 拒绝,实得放行 %q", got)
+	}
+	if !strings.Contains(err.Error(), "forbidden write") {
+		t.Errorf("错误消息应指出 forbidden write,实得: %v", err)
+	}
+}
+
+// TestValidateWritePath_RejectsSymlinkEscape 验证白名单内的符号链接指向敏感
+// 文件时必须被拒(写路径强制完整 realpath 解析后落到 /etc/shadow)。
+func TestValidateWritePath_RejectsSymlinkEscape(t *testing.T) {
+	base := mustMkdirTempUnderTmp(t)
+	link := filepath.Join(base, "escape-shadow")
+	if err := os.Symlink("/etc/shadow", link); err != nil {
+		t.Fatalf("创建符号链接失败: %v", err)
+	}
+	got, err := ValidateWritePath(link)
+	if err == nil {
+		t.Fatalf("symlink 逃逸 %q 被放行(解析为 %q)", link, got)
+	}
+	if !strings.Contains(err.Error(), "write denied") {
+		t.Errorf("symlink 逃逸错误消息异常: %v", err)
+	}
+}
+
+// TestValidateWritePath_RejectsNonexistentTarget 验证写路径强制完整 realpath:
+// 末段不存在(且父目录不存在)时必须拒绝,不允许回退到词法规范化。
+func TestValidateWritePath_RejectsNonexistentTarget(t *testing.T) {
+	got, err := ValidateWritePath("/home/pathguard_missing_parent_zzz/file.txt")
+	if err == nil {
+		t.Fatalf("不存在的写目标被放行(解析为 %q)", got)
+	}
+	if !strings.Contains(err.Error(), "cannot resolve realpath") {
+		t.Errorf("错误消息应指出 realpath 无法解析,实得: %v", err)
+	}
+}
+
+// TestValidateWritePath_AllowsWhitelistedTarget 验证 /tmp 下真实存在文件可写。
+func TestValidateWritePath_AllowsWhitelistedTarget(t *testing.T) {
+	f, err := os.CreateTemp("/tmp", "pathguard-write-*")
+	if err != nil {
+		t.Fatalf("创建 /tmp 临时文件失败: %v", err)
+	}
+	name := f.Name()
+	_ = f.Close()
+	t.Cleanup(func() { _ = os.Remove(name) })
+
+	got, err := ValidateWritePath(name)
+	if err != nil {
+		t.Fatalf("白名单内真实文件被误拒: %v", err)
+	}
+	want, _ := filepath.EvalSymlinks(name)
+	if got != want {
+		t.Errorf("ValidateWritePath(%q) = %q, want %q", name, got, want)
+	}
+}
+
+// TestValidateWritePath_AllowsAllowedDirSubpath 验证白名单目录本身及其子路径
+// 在真实存在时放行。
+func TestValidateWritePath_AllowsAllowedDirSubpath(t *testing.T) {
+	requireRealPath(t, "/home", "/home")
+	got, err := ValidateWritePath("/home")
+	if err != nil {
+		t.Fatalf("白名单目录 /home 被误拒: %v", err)
+	}
+	if got != "/home" {
+		t.Errorf("ValidateWritePath(/home) = %q, want /home", got)
+	}
+}
+
 // requireRealPath 锁定本机 realpath 事实,不满足时跳过(而非误报失败)。
 func requireRealPath(t *testing.T, p, want string) {
 	t.Helper()

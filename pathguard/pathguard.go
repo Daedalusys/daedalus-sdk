@@ -105,3 +105,110 @@ func normalizePath(p string) string {
 	}
 	return "/" + strings.Join(stack, "/")
 }
+
+// readOnlySystemDirs 是即便 AllowedDirs 后续被错配也绝对禁止写入的
+// 系统只读目录清单。覆盖 composefs 只读 mount(/usr /boot /etc)与
+// 伪文件系统(/proc /sys)与关键状态目录(/var/lib/rpm)。这些路径
+// 的写入会破坏 bootc 原子性或写入物理不可达位置。
+var readOnlySystemDirs = []string{
+	"/proc",
+	"/sys",
+	"/boot",
+	"/usr",
+	"/etc",
+	"/var/lib/rpm",
+}
+
+// forbiddenWritePatterns 是即便父目录在白名单内也禁止写入的敏感文件
+// 通配清单。覆盖 PAM / 鉴权 / sudo 等任一被改即获权的关键路径。匹配
+// 规则:精确等于或前缀匹配(目录末尾带 '/' 视为"目录下所有文件")。
+var forbiddenWritePatterns = []string{
+	"/etc/shadow",
+	"/etc/passwd",
+	"/etc/sudoers",
+	"/etc/sudoers.d/",
+	"/etc/gshadow",
+	"/etc/pam.d/",
+}
+
+// ValidateWritePath 是 fs 写操作的二档粒度路径校验。
+//
+// 在 ValidatePath 既有规则(非空 / 拒空字节 / 必须绝对路径 / realpath
+// 解析 / AllowedDirs 前缀边界)之上,叠加三条额外约束:
+//
+//  1. 拒写只读系统目录(readOnlySystemDirs):即便 AllowedDirs 后续被
+//     错配放宽,/proc /sys /boot /usr /etc /var/lib/rpm 的写入依然
+//     绝对禁止——这些路径的写入要么破坏 bootc 原子性(composefs 只读
+//     mount),要么落点是伪文件系统(/proc /sys),要么直接拿到权限。
+//
+//  2. 拒写敏感文件(forbiddenWritePatterns):PAM / shadow / sudoers 等
+//     通配路径直接拒绝,即便父目录在 AllowedDirs 内。这条防线独立于
+//     AllowedDirs,防止攻击者通过创建关键文件名直接获得系统控制。
+//
+//  3. 强制完整 realpath:不允许 ValidatePath 的"末段不存在回退到词法
+//     规范化"分支——写操作目标必须真实存在或父目录必须可解析。理由:
+//     读可以 stat 失败的路径回退到词法校验(零副作用可恢复),写必须
+//     明确知道落到哪。这是写比读严的核心理由。
+//
+// ValidateWritePath 不修改 AllowedDirs;消费方通过 pathguard.WithAllowedDirs
+// 在进程启动时扩展写白名单(参见 fs / shell / dupe / disk-clean 等插件
+// 的 applyPolicy 入口)。
+func ValidateWritePath(pathStr string) (string, error) {
+	if pathStr == "" {
+		return "", errors.New("Path must be a non-empty string.")
+	}
+	if strings.ContainsRune(pathStr, 0) {
+		return "", errors.New("Invalid path: null bytes are forbidden.")
+	}
+	if !strings.HasPrefix(pathStr, "/") {
+		return "", fmt.Errorf("Invalid path '%s': only absolute paths are permitted.", pathStr)
+	}
+
+	// 强制完整 realpath:若 EvalSymlinks 失败,立即拒绝。
+	// 末段不存在时回退"逐级解析最深现存父目录"的路径不允许用于写——
+	// 写必须明确知道落到哪个 inode,不能"猜目标"。
+	canonicalPath, err := filepath.EvalSymlinks(pathStr)
+	if err != nil {
+		return "", fmt.Errorf("write denied: cannot resolve realpath for %q: %w", pathStr, err)
+	}
+
+	// 只读系统目录检查:realpath 后命中 readOnlySystemDirs 任一前缀或
+	// 精确等于,拒绝。
+	for _, ro := range readOnlySystemDirs {
+		cleanRO := strings.TrimRight(ro, "/")
+		if canonicalPath == cleanRO || strings.HasPrefix(canonicalPath, cleanRO+"/") {
+			return "", fmt.Errorf("write denied: path resolves to read-only system dir %q", ro)
+		}
+	}
+
+	// 敏感文件通配检查:realpath 后命中 forbiddenWritePatterns 任一
+	// 精确或前缀(目录型带 '/' 结尾视为子树匹配),拒绝。
+	for _, pat := range forbiddenWritePatterns {
+		cleanPat := strings.TrimRight(pat, "/")
+		if strings.HasSuffix(pat, "/") {
+			// 目录型通配:pattern = "/etc/sudoers.d/" → 匹配 "/etc/sudoers.d"
+			// 与其下任何文件。
+			if canonicalPath == cleanPat || strings.HasPrefix(canonicalPath, pat) {
+				return "", fmt.Errorf("write denied: path %q falls under forbidden write pattern %q", canonicalPath, pat)
+			}
+		} else {
+			// 文件型通配:精确等于。
+			if canonicalPath == cleanPat {
+				return "", fmt.Errorf("write denied: path %q is a forbidden write target", canonicalPath)
+			}
+		}
+	}
+
+	// AllowedDirs 前缀边界检查(与 ValidatePath 一致)。
+	for _, allowed := range AllowedDirs {
+		allowedCanonical := realpathLike(allowed)
+		cleanAllowed := strings.TrimRight(allowedCanonical, "/")
+		if canonicalPath == cleanAllowed || strings.HasPrefix(canonicalPath, cleanAllowed+"/") {
+			return canonicalPath, nil
+		}
+	}
+
+	return "", fmt.Errorf(
+		"write denied: path '%s' (resolved: '%s') is outside allowed directories (%s).",
+		pathStr, canonicalPath, strings.Join(AllowedDirs, ", "))
+}

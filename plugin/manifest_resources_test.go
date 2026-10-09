@@ -119,7 +119,7 @@ func TestParseManifest_Resources(t *testing.T) {
 }
 
 // TestValidate_OfficialPluginManifests 向后兼容硬断言:仓库内官方插件
-// manifest 源文件(9 个能力插件在 daedalus-plugins/,copilot 留主仓
+// manifest 源文件(11 个能力插件在 daedalus-plugins/,copilot 留主仓
 // daedalus-core/plugin/copilot/)必须能被 ParseManifest 读取并通过
 // Validate——含 copilot 在内全部清单已升级 C1 schema(api_version/
 // license/maintainer 与 runtime 字段齐备)。
@@ -142,6 +142,8 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 		{"service", filepath.Join(pluginsRoot, "service")},
 		{"blueprint", filepath.Join(pluginsRoot, "blueprint")},
 		{"dupe", filepath.Join(pluginsRoot, "dupe")},
+		{"diskclean", filepath.Join(pluginsRoot, "diskclean")},
+		{"organize", filepath.Join(pluginsRoot, "organize")},
 		{"trace", filepath.Join(pluginsRoot, "trace")},
 		{"proc", filepath.Join(pluginsRoot, "proc")},
 		{"copilot", filepath.Join("..", "..", "daedalus-core", "plugin", "copilot")},

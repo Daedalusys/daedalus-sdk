@@ -3,78 +3,47 @@ package blueprint
 import (
 	"testing"
 	"time"
+
+	"github.com/Daedalusys/daedalus-sdk/confirmation"
 )
 
-// TestConfirmToken_SingleUse 是守门测试:
-// 确认令牌单次有效——Verify 成功一次即消费,第二次必须失败。
-// 该契约是 framework "step 间依赖"扩展的早期落地。
-func TestConfirmToken_SingleUse(t *testing.T) {
-	tok := GenerateConfirmToken("plan-1")
-
-	// 第一次 Verify:配对且未消费 → 成功。
-	if err := VerifyConfirmToken("plan-1", tok); err != nil {
-		t.Fatalf("第一次 Verify 返回错误,期望成功: %v", err)
+// TestBlueprint_ConfirmTokenIsReExport 钉死 blueprint 薄包装与 confirmation 通用包
+// 的字节级兼容:blueprint 端签发的 token 必须既能通过 blueprint 包装校验,也能
+// 通过 confirmation 包校验(两者共享同一签发登记表),反之亦然。
+//
+// 该测试是抽取阶段(plan framework 缺口落地)的回归护栏:一旦有人把 blueprint
+// 薄包装改为独立实现(而非透传),双向兼容立即失败。
+func TestBlueprint_ConfirmTokenIsReExport(t *testing.T) {
+	// blueprint 签发 → blueprint 校验(backward-compat 主路径)。
+	tok := GenerateConfirmToken("plan-compat")
+	if err := VerifyConfirmToken("plan-compat", tok); err != nil {
+		t.Fatalf("blueprint 包装双向校验失败: %v", err)
 	}
-	// 第二次 Verify:已消费 → 必须失败。
-	if err := VerifyConfirmToken("plan-1", tok); err == nil {
-		t.Fatal("第二次 Verify 返回 nil 错误,期望令牌已消费而失败")
+
+	// blueprint 签发 → confirmation 直接校验(同登记表,共享消费语义)。
+	tok2 := GenerateConfirmToken("plan-shared")
+	if err := confirmation.VerifyConfirmToken("plan-shared", tok2); err != nil {
+		t.Fatalf("blueprint 签发 token 未通过 confirmation 校验: %v", err)
 	}
-}
 
-// TestConfirmToken_PlanIDMismatch 是守门测试:
-// plan_id 与令牌携带的 PlanID 不匹配必须失败(配对校验)。
-func TestConfirmToken_PlanIDMismatch(t *testing.T) {
-	tok := GenerateConfirmToken("plan-1")
-
-	if err := VerifyConfirmToken("plan-2", tok); err == nil {
-		t.Fatal("VerifyConfirmToken 返回 nil 错误,期望 plan_id 不匹配而失败")
-	}
-}
-
-// TestConfirmToken_Expired 验证过期令牌即使未消费也不可用。
-func TestConfirmToken_Expired(t *testing.T) {
-	tok := GenerateConfirmToken("plan-1")
-	// 把过期时间改成过去(已过期),未消费状态。
-	tok.Expires = time.Now().Add(-time.Minute).UnixMilli()
-
-	if err := VerifyConfirmToken("plan-1", tok); err == nil {
-		t.Fatal("VerifyConfirmToken 返回 nil 错误,期望过期令牌失败")
+	// confirmation 签发 → blueprint 包装校验。
+	tok3 := confirmation.GenerateConfirmToken("plan-reverse")
+	if err := VerifyConfirmToken("plan-reverse", tok3); err != nil {
+		t.Fatalf("confirmation 签发 token 未通过 blueprint 包装校验: %v", err)
 	}
 }
 
-// TestConfirmToken_Empty 验证空令牌被拒绝。
-func TestConfirmToken_Empty(t *testing.T) {
-	tok := ConfirmToken{Token: "", PlanID: "plan-1", Expires: time.Now().Add(time.Hour).UnixMilli()}
-	if err := VerifyConfirmToken("plan-1", tok); err == nil {
-		t.Fatal("VerifyConfirmToken 返回 nil 错误,期望空令牌失败")
+// TestBlueprint_ConfirmTokenTypeAlias 确认 blueprint.ConfirmToken 与
+// confirmation.ConfirmToken 是同一类型(别名,非独立结构)。
+func TestBlueprint_ConfirmTokenTypeAlias(t *testing.T) {
+	var a ConfirmToken = confirmation.ConfirmToken{
+		Token:     "x",
+		SubjectID: "s",
+		Expires:   time.Now().Add(time.Hour).UnixMilli(),
 	}
-}
-
-// TestConfirmToken_UnissuedRejected 是守门测试:
-// 未经 GenerateConfirmToken 签发的令牌(凭空伪造的串,含 Expires==0
-// "永不过期"形态)必须被拒——校验只认签发登记表,不采信自报字段。
-func TestConfirmToken_UnissuedRejected(t *testing.T) {
-	forged := ConfirmToken{Token: "deadbeef", PlanID: "x", Expires: 0}
-	if err := VerifyConfirmToken("x", forged); err == nil {
-		t.Fatal("伪造的未签发令牌通过了校验")
-	}
-}
-
-// TestConfirmToken_SelfReportedCannotExtend 验证自报 Expires 不能放宽有效期:
-// 签发记录内(未过期)的令牌,自报一个已过去的 Expires 必须判过期被拒;
-// 自报 0 则回落到签发记录的过期时刻,不存在"不设过期"特权。
-func TestConfirmToken_SelfReportedCannotExtend(t *testing.T) {
-	tok := GenerateConfirmToken("plan-zero")
-
-	early := tok
-	early.Expires = time.Now().Add(-time.Minute).UnixMilli()
-	if err := VerifyConfirmToken("plan-zero", early); err == nil {
-		t.Fatal("自报已过期时刻的令牌通过了校验")
-	}
-
-	zero := tok
-	zero.Expires = 0 // 自报 0 不是永不过期,也不是豁免:按签发记录判定。
-	if err := VerifyConfirmToken("plan-zero", zero); err != nil {
-		t.Fatalf("签发记录未过期的令牌应通过(自报 0 回落记录值): %v", err)
+	// 类型别名下,两边字段必须完全互通(编译期即证明)。
+	var b confirmation.ConfirmToken = a
+	if b.SubjectID != "s" || b.Token != "x" {
+		t.Fatalf("类型别名字段互通失败: %+v", b)
 	}
 }
