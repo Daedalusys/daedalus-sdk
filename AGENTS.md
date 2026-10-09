@@ -2,7 +2,7 @@
 
 **Generated:** 2026-09-21
 **Repo:** `github.com/Daedalusys/daedalus-sdk` (Go module, single root)
-**Siblings:** `../daedalus-core/` (Daedalusys, runtime + image), `../daedalus-plugins/` (17 capability plugins)
+**Siblings:** `../daedalus-core/` (Daedalusys, runtime + image), `../daedalus-plugins/` (6 capability plugins)
 
 ## OVERVIEW
 Daedalus SDK 仓根 = 四层结构中的 **SDK 层**(决策 23/24 + 25)。
