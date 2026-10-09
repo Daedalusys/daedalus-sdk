@@ -1,5 +1,5 @@
 // manifest.go resources 字段的专项测试:接受面/拒绝面/JSON 边界,
-// 以及对仓库内 17 个官方插件 manifest 源文件的向后兼容硬断言。
+// 以及对仓库内 9 个官方插件 manifest 源文件的向后兼容硬断言。
 package plugin
 
 import (
@@ -119,7 +119,7 @@ func TestParseManifest_Resources(t *testing.T) {
 }
 
 // TestValidate_OfficialPluginManifests 向后兼容硬断言:仓库内官方插件
-// manifest 源文件(17 个能力插件在 daedalus-plugins/,copilot 留主仓
+// manifest 源文件(9 个能力插件在 daedalus-plugins/,copilot 留主仓
 // daedalus-core/plugin/copilot/)必须能被 ParseManifest 读取并通过
 // Validate——含 copilot 在内全部清单已升级 C1 schema(api_version/
 // license/maintainer 与 runtime 字段齐备)。
@@ -127,7 +127,8 @@ func TestParseManifest_Resources(t *testing.T) {
 // 执行点不在本仓 CI:相对路径 ../../daedalus-plugins 落在 GITHUB_WORKSPACE
 // 之外,Actions 不允许 checkout 逃到那里,所以 SDK 单独跑必然缺兄弟仓。兄弟根
 // 缺失即显式 skip;真正的执行点是 daedalus-core 的 test job(它把三仓检出到同一
-// workspace 的平级子目录,相对路径恰好吃满)。
+// workspace 的平级子目录,相对路径恰好吃满)。只钉 plugins 一个根:copilot 根缺
+// 席不在兜底范围内,该子测试照常 fail——半套布局不能当作通过。
 func TestValidate_OfficialPluginManifests(t *testing.T) {
 	pluginsRoot := filepath.Join("..", "..", "daedalus-plugins")
 	if _, err := os.Stat(pluginsRoot); err != nil {
@@ -143,14 +144,6 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 		{"dupe", filepath.Join(pluginsRoot, "dupe")},
 		{"trace", filepath.Join(pluginsRoot, "trace")},
 		{"proc", filepath.Join(pluginsRoot, "proc")},
-		{"hwmon", filepath.Join(pluginsRoot, "hwmon")},
-		{"journal", filepath.Join(pluginsRoot, "journal")},
-		{"triage", filepath.Join(pluginsRoot, "triage")},
-		{"integrity", filepath.Join(pluginsRoot, "integrity")},
-		{"avc", filepath.Join(pluginsRoot, "avc")},
-		{"gpu", filepath.Join(pluginsRoot, "gpu")},
-		{"smart", filepath.Join(pluginsRoot, "smart")},
-		{"search", filepath.Join(pluginsRoot, "search")},
 		{"copilot", filepath.Join("..", "..", "daedalus-core", "plugin", "copilot")},
 	}
 	for _, tc := range ids {
@@ -169,7 +162,7 @@ func TestValidate_OfficialPluginManifests(t *testing.T) {
 				t.Fatalf("官方 manifest runtime 未解析: %+v", m.Runtime)
 			}
 			if err := m.Validate(); err != nil {
-				t.Fatalf("官方 manifest 应通过校验(含 copilot 的 C1 升级): %v", err)
+				t.Fatalf("官方 manifest 应通过校验: %v", err)
 			}
 		})
 	}

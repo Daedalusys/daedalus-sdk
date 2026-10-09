@@ -92,7 +92,7 @@ issue #46 决定走 SDK 路线 = 接受此 trade-off。安全边界从"编译器
 4. 审计写入一律经 `daedalus-audit` CLI,进程内**禁止**直接 import `audit` 写文件
    (AGENTS.md「ANTI-PATTERNS」条款,SDK 公开面不豁免)。
 
-当前镜像内全部能力服务器(`daedalus-{fs,shell,pkg,sysinfo,service,blueprint,hwmon,journal,triage,integrity,avc,gpu,smart,search}.service`)
+当前镜像内全部能力服务器(`daedalus-{fs,shell,pkg,sysinfo,service,blueprint}.service`)
 与宿主均满足上述清单;新增消费方(如未来 controller runtime)必须照抄
 `daedalus-*.service.d/` 模式,否则视为部署错误。
 
