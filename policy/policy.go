@@ -381,8 +381,13 @@ func Default() *Policy {
 			OldKernelDirPattern: "/boot",
 		},
 		// Ownership 默认最保守;未在 policy.toml 中声明则 platform 零期望。
+		// by_kind 默认与生产 policy.toml 同步(service = observe),三点漂移
+		// 测试(TestPolicy_Ownership_DriftWithRealToml)钉一致。
 		Ownership: Ownership{
 			Default: OwnershipUnmanaged,
+			ByKind: map[string]OwnershipMode{
+				"service": OwnershipObserve,
+			},
 		},
 	}
 }

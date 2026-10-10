@@ -748,3 +748,32 @@ func TestPolicy_Confirmation_DiskClean_DriftWithRealToml(t *testing.T) {
 		t.Errorf("diskclean.old_kernel_dir_pattern 漂移: %q vs %q", real.DiskClean.OldKernelDirPattern, def.DiskClean.OldKernelDirPattern)
 	}
 }
+
+// TestPolicy_Ownership_DriftWithRealToml 是 [ownership] 段的镜像 policy.toml
+// 三点漂移测试:解析仓库真实 policy.toml,与 Default() 逐字段一致。
+// 任何修改 policy.toml / Default() 单边的提交必须同步另一侧,否则此测试 fail-closed。
+func TestPolicy_Ownership_DriftWithRealToml(t *testing.T) {
+	t.Setenv(policy.EnvPolicyPath, "")
+	st, err := os.Stat(policy.ProductionPath)
+	if err == nil && !st.IsDir() {
+		t.Skipf("本机存在 %s,无法演练开发态回溯", policy.ProductionPath)
+	}
+	repoPolicy, err := policy.ResolvePath()
+	if err != nil {
+		t.Fatalf("开发态回溯未命中仓库 policy.toml: %v", err)
+	}
+	real, err := policy.Load(repoPolicy)
+	if err != nil {
+		t.Fatalf("镜像 policy.toml 未通过自身校验(含 [ownership] 段): %v", err)
+	}
+	if err := real.ValidateOwnership(); err != nil {
+		t.Fatalf("镜像 policy.toml ValidateOwnership 失败: %v", err)
+	}
+	def := policy.Default()
+	if real.Ownership.Default != def.Ownership.Default {
+		t.Errorf("ownership.default 漂移: %q vs %q", real.Ownership.Default, def.Ownership.Default)
+	}
+	if real.Ownership.ByKind["service"] != def.Ownership.ByKind["service"] {
+		t.Errorf("ownership.by_kind[service] 漂移: %q vs %q", real.Ownership.ByKind["service"], def.Ownership.ByKind["service"])
+	}
+}

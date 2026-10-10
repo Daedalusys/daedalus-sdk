@@ -101,3 +101,20 @@ allowed_write_dirs = ["/var/log/journal", "/var/cache/dnf", "/var/cache/PackageK
 
 # 旧内核路径模板(rpm -q kernel 解析后命中此前缀的目录视为"旧内核可清理")。
 old_kernel_dir_pattern = "/boot"
+
+[ownership]
+# 资源 ownership 模式策略节(P4/V6 P4 controller 入口,core#2):
+# 声明式列出资源 kind 的管理 ownership 模式。
+# 模式枚举(封闭,逐字对齐 daedalus-sdk/policy.OwnershipMode):
+#   "unmanaged"             — 平台只观测不驱动(默认最保守)
+#   "observe"               — 报告 drift,不自动驱动
+#   "managed/manual"        — 变更仍走显式 tx,人在环
+#   "managed/reconcile"     — controller 持续驱动 desired→observed
+# fail-closed:default 不在枚举 / by_kind 引用未启用 kind → 启动拒绝。
+# 本值与 internal/policy.Default() 由三点漂移测试钉死一致。
+default = "unmanaged"
+
+[ownership.by_kind]
+# service 一律 observe:用户能看见 drift 但 controller 不会自动驱动;
+# 用户切到 managed/reconcile 时需要按 kind/name 粒度显式声明(P4.5 overrides 切片)。
+service = "observe"
