@@ -24,12 +24,17 @@ type Object struct {
 }
 
 // Metadata 是对象的名字与标签维度。Generation 是期望版本计数,由改动 spec 的
-// 一方递增,观测方回写 Status.ObservedGeneration 与之比对。
+// 一方递增,观测方回写 Status.ObservedGeneration 与之比对。UID 与 ResourceVersion
+// 是 controller 调和循环可读可填的可选字段:v1 范围 = 字段 + 校验,实际填充
+// 由各 provider 在 set/apply 后回写,BumpGeneration 仅递增 Generation 不动
+// ResourceVersion(后者由版本调和方管理,语义切分)。
 type Metadata struct {
-	Name        string            `json:"name"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Annotations map[string]string `json:"annotations,omitempty"`
-	Generation  int64             `json:"generation"`
+	Name            string            `json:"name"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
+	Generation      int64             `json:"generation"`
+	UID             string            `json:"uid,omitempty"`
+	ResourceVersion string            `json:"resource_version,omitempty"`
 }
 
 // Status 是观测态载荷:版本比对 + 条件列表 + provider 原始属性
@@ -135,4 +140,13 @@ func (m Metadata) MatchLabels(sel map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// BumpGeneration 递增期望版本并返回新值。ResourceVersion 由版本调和方管理,
+// 不在本方法动 —— 期望方写 Generation,观测方写 Status.ObservedGeneration 与之
+// 比对;ResourceVersion 是 apiserver 内部单调号,提供者写 spec 时由 provider
+// 自行回填。两者职责切分,BumpGeneration 不得越界。
+func (m *Metadata) BumpGeneration() int64 {
+	m.Generation++
+	return m.Generation
 }

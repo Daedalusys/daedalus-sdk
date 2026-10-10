@@ -197,3 +197,83 @@ func TestServiceState_JSONBackwardCompat(t *testing.T) {
 		t.Fatalf("旧行回解结果错误: %#v", st)
 	}
 }
+
+// TestMetadata_BumpGeneration 锁定 BumpGeneration 递增期望版本并返回新值;
+// 零值、正数、大数三种 case 覆盖。
+func TestMetadata_BumpGeneration(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		init int64
+		want int64
+	}{
+		{"零值递增", 0, 1},
+		{"正数递增", 7, 8},
+		{"大数递增", 1<<62 - 1, 1<<62},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := &Metadata{Name: "x", Generation: tc.init}
+			got := m.BumpGeneration()
+			if got != tc.want {
+				t.Fatalf("返回值 = %d, want %d", got, tc.want)
+			}
+			if m.Generation != tc.want {
+				t.Fatalf("Generation 字段未更新: got %d, want %d", m.Generation, tc.want)
+			}
+		})
+	}
+}
+
+// BumpGeneration 不得触碰 ResourceVersion(后者由 set spec 后的版本调和方递增,
+// BumpGeneration 是 tx apply 阶段的"我期望 v+1"信号)。
+func TestMetadata_BumpGeneration_DoesNotTouchResourceVersion(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x", Generation: 5, ResourceVersion: "rv-7"}
+	m.BumpGeneration()
+	if m.ResourceVersion != "rv-7" {
+		t.Fatalf("ResourceVersion 被改: got %q, want %q", m.ResourceVersion, "rv-7")
+	}
+}
+
+// 空值 UID / ResourceVersion 在 JSON 里不出现(omitempty);既有零值形态字节不变。
+func TestMetadata_UID_ResourceVersion_OmitEmpty(t *testing.T) {
+	t.Parallel()
+	m := Metadata{Name: "x"}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"x","generation":0}`
+	if string(b) != want {
+		t.Fatalf("零值形态漂移:\n got %s\nwant %s", b, want)
+	}
+}
+
+// 非空 UID / ResourceVersion 在 JSON 出现且键名 = uid / resource_version,顺序在
+// generation 之后(字段声明序)。
+func TestMetadata_UID_ResourceVersion_RoundTrip(t *testing.T) {
+	t.Parallel()
+	m := Metadata{
+		Name:            "sshd.service",
+		Generation:      7,
+		UID:             "abc-123",
+		ResourceVersion: "rv-9",
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"sshd.service","generation":7,"uid":"abc-123","resource_version":"rv-9"}`
+	if string(b) != want {
+		t.Fatalf("序列化漂移:\n got %s\nwant %s", b, want)
+	}
+	var back Metadata
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m, back) {
+		t.Fatalf("往返不等: got %#v want %#v", back, m)
+	}
+}
