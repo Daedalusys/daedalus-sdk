@@ -419,6 +419,76 @@ func TestOwnerReference_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestObject_GoldenRoundTrip_FullMetadata 锁全字段(UID / ResourceVersion /
+// OwnerReferences / Finalizers)的字节形态。该 want 字面量同时被
+// daedalus-core/internal/controller/types_test.go 引用(Review Focus #5),
+// 任何一侧漂移另一侧编译失败。
+func TestObject_GoldenRoundTrip_FullMetadata(t *testing.T) {
+	t.Parallel()
+	obj := Object{
+		APIVersion: "v1",
+		Kind:       KindService,
+		Metadata: Metadata{
+			Name:            "sshd.service",
+			Labels:          map[string]string{"app": "sshd"},
+			Annotations:     map[string]string{"owner": "daedalus"},
+			Generation:      7,
+			UID:             "sshd-uid-1",
+			ResourceVersion: "rv-9",
+			OwnerReferences: []OwnerReference{{Kind: KindService, Name: "parent.service"}},
+			Finalizers:      []Finalizer{"daedalus.core/protect"},
+		},
+		Spec: json.RawMessage(`{"desired_state":"active"}`),
+		Status: Status{
+			ObservedGeneration: 6,
+			Conditions: []Condition{{
+				Type:               "Ready",
+				Status:             ConditionTrue,
+				Reason:             "AsExpected",
+				Message:            "unit active",
+				LastTransitionTime: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC),
+			}},
+			Properties: map[string]string{"ActiveState": "active"},
+		},
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"api_version":"v1","kind":"service","metadata":{"name":"sshd.service","labels":{"app":"sshd"},"annotations":{"owner":"daedalus"},"generation":7,"uid":"sshd-uid-1","resource_version":"rv-9","owner_references":[{"kind":"service","name":"parent.service"}],"finalizers":["daedalus.core/protect"]},"spec":{"desired_state":"active"},"status":{"observed_generation":6,"conditions":[{"type":"Ready","status":"True","reason":"AsExpected","message":"unit active","last_transition_time":"2026-10-10T00:00:00Z"}],"properties":{"ActiveState":"active"}}}`
+	if string(b) != want {
+		t.Fatalf("Envelope 全字段金样漂移:\n got %s\nwant %s", b, want)
+	}
+
+	var back Object
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(obj, back) {
+		t.Fatalf("往返不等:\n got %#v\nwant %#v", back, obj)
+	}
+}
+
+// TestUpsertCondition_SameStatusDoesNotRefreshTime 钉死"同状态写回不刷转换时刻"
+// 行为,防止 controller P4 落地时被静默刷新(Review Focus #3)。
+func TestUpsertCondition_SameStatusDoesNotRefreshTime(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	st := Status{Conditions: []Condition{{
+		Type: "Ready", Status: ConditionTrue, Reason: "R1", Message: "M1", LastTransitionTime: base,
+	}}}
+	st.UpsertCondition(Condition{
+		Type: "Ready", Status: ConditionTrue, Reason: "R2", Message: "M2", LastTransitionTime: time.Now().UTC(),
+	})
+	if !st.Conditions[0].LastTransitionTime.Equal(base) {
+		t.Fatalf("同状态写回刷了 LastTransitionTime: got %v, want %v",
+			st.Conditions[0].LastTransitionTime, base)
+	}
+	if st.Conditions[0].Reason != "R2" || st.Conditions[0].Message != "M2" {
+		t.Fatalf("同状态写回应更新 reason/message: got %#v", st.Conditions[0])
+	}
+}
+
 // TestFinalizer_AddRemoveHas 锁定 finalizer 增删查语义:首次新增返回 true,重复返回
 // false;Remove 已存在返回 true,不在返回 false;Has 仅查存在。
 func TestFinalizer_AddRemoveHas(t *testing.T) {
