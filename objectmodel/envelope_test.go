@@ -379,3 +379,69 @@ func TestFilterByLabels(t *testing.T) {
 		}
 	})
 }
+
+// TestOwnerReference_RoundTrip 锁定 OwnerReference 字段顺序与 omitempty 语义:
+// api_version / uid / controller / block_owner_deletion 都 omitempty;kind / name 必填且恒出。
+func TestOwnerReference_RoundTrip(t *testing.T) {
+	t.Parallel()
+	obj := Object{
+		Kind: KindService,
+		// Spec 显式设置为 json.RawMessage("null") 以让 marshal+unmarshal 往返
+		// DeepEqual 成立(nil json.RawMessage 会被 Unmarshal 为 []byte("null"),
+		// 与 nil 不等 —— Go 标准库行为,非本测试可调控)。
+		Spec: json.RawMessage("null"),
+		Metadata: Metadata{
+			Name: "child",
+			OwnerReferences: []OwnerReference{{
+				APIVersion:         "v1",
+				Kind:               KindService,
+				Name:               "parent",
+				UID:                "parent-uid-1",
+				Controller:         true,
+				BlockOwnerDeletion: true,
+			}},
+		},
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"api_version":"","kind":"service","metadata":{"name":"child","generation":0,"owner_references":[{"api_version":"v1","kind":"service","name":"parent","uid":"parent-uid-1","controller":true,"block_owner_deletion":true}]},"spec":null,"status":{"observed_generation":0}}`
+	if string(b) != want {
+		t.Fatalf("OwnerReference 序列化漂移:\n got %s\nwant %s", b, want)
+	}
+	var back Object
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(obj, back) {
+		t.Fatalf("往返不等: got %#v want %#v", back, obj)
+	}
+}
+
+// TestFinalizer_AddRemoveHas 锁定 finalizer 增删查语义:首次新增返回 true,重复返回
+// false;Remove 已存在返回 true,不在返回 false;Has 仅查存在。
+func TestFinalizer_AddRemoveHas(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x"}
+
+	if !m.AddFinalizer("protect.example.com/cleanup") {
+		t.Fatal("首次 AddFinalizer 应返回 true")
+	}
+	if m.AddFinalizer("protect.example.com/cleanup") {
+		t.Fatal("重复 AddFinalizer 应返回 false")
+	}
+	if !m.HasFinalizer("protect.example.com/cleanup") {
+		t.Fatal("已添加 finalizer 必须命中 HasFinalizer")
+	}
+
+	if !m.RemoveFinalizer("protect.example.com/cleanup") {
+		t.Fatal("存在的 finalizer Remove 必须返回 true")
+	}
+	if m.RemoveFinalizer("protect.example.com/cleanup") {
+		t.Fatal("不存在的 finalizer Remove 必须返回 false")
+	}
+	if m.HasFinalizer("protect.example.com/cleanup") {
+		t.Fatal("移除后不得命中")
+	}
+}

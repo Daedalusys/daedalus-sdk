@@ -35,7 +35,28 @@ type Metadata struct {
 	Generation      int64             `json:"generation"`
 	UID             string            `json:"uid,omitempty"`
 	ResourceVersion string            `json:"resource_version,omitempty"`
+	OwnerReferences []OwnerReference  `json:"owner_references,omitempty"`
+	Finalizers      []Finalizer       `json:"finalizers,omitempty"`
 }
+
+// OwnerReference 指向父对象,用于 ownerRef 链构造父子关系与 GC 拓扑。
+// Kind 必须是已定义的封闭枚举之一(校验由 Validate 集中处理);
+// UID 非空时遵循 Metadata.UID 同规则;APIVersion / Controller /
+// BlockOwnerDeletion 沿用 k8s OwnerReference 字段名,但语义对齐 Daedalus 现状
+// —— GC 逻辑不在 v1 范围(归 P4),字段只是"在场 + 可校验"。
+type OwnerReference struct {
+	APIVersion         string `json:"api_version,omitempty"`
+	Kind               Kind   `json:"kind"`
+	Name               string `json:"name"`
+	UID                string `json:"uid,omitempty"`
+	Controller         bool   `json:"controller,omitempty"`
+	BlockOwnerDeletion bool   `json:"block_owner_deletion,omitempty"`
+}
+
+// Finalizer 是延迟删除的钩子名(惯例:反向 DNS + 行为短词,如
+// "daedalus.core/protect")。本层只钉类型与增删查;finalizer 触发 GC 的实际
+// 控制器逻辑归 P4。
+type Finalizer string
 
 // Status 是观测态载荷:版本比对 + 条件列表 + provider 原始属性
 // (如 systemctl 键值原文)。
@@ -182,6 +203,44 @@ func (m *Metadata) SetAnnotation(key, value string) {
 func (m Metadata) HasLabel(key string) bool {
 	_, ok := m.Labels[key]
 	return ok
+}
+
+// AddFinalizer 追加 finalizer(已存在返回 false,新增返回 true)。空串视作语义错,
+// 拒绝 —— finalizer 是 controller 钩子契约,空字符串让 GC 永远命中"未保护"
+// 分支,运行时不能容忍。
+func (m *Metadata) AddFinalizer(f Finalizer) bool {
+	if f == "" {
+		return false
+	}
+	for _, existing := range m.Finalizers {
+		if existing == f {
+			return false
+		}
+	}
+	m.Finalizers = append(m.Finalizers, f)
+	return true
+}
+
+// RemoveFinalizer 移除 finalizer(已存在返回 true,不在返回 false)。
+func (m *Metadata) RemoveFinalizer(f Finalizer) bool {
+	for i, existing := range m.Finalizers {
+		if existing != f {
+			continue
+		}
+		m.Finalizers = append(m.Finalizers[:i], m.Finalizers[i+1:]...)
+		return true
+	}
+	return false
+}
+
+// HasFinalizer 报告 finalizer 是否存在。
+func (m *Metadata) HasFinalizer(f Finalizer) bool {
+	for _, existing := range m.Finalizers {
+		if existing == f {
+			return true
+		}
+	}
+	return false
 }
 
 // FilterByLabels 返回 metadata 匹配 sel 全部键值对的对象(顺序与入参一致)。
