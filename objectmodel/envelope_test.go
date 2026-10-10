@@ -209,7 +209,7 @@ func TestMetadata_BumpGeneration(t *testing.T) {
 	}{
 		{"零值递增", 0, 1},
 		{"正数递增", 7, 8},
-		{"大数递增", 1<<62 - 1, 1<<62},
+		{"大数递增", 1<<62 - 1, 1 << 62},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
