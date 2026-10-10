@@ -135,6 +135,33 @@ type Ownership struct {
 	ByKind  map[string]OwnershipMode `toml:"by_kind"`
 }
 
+// ValidateOwnership 校验 ownership 策略节(fail-closed):
+//   - Default 为空时填充 OwnershipUnmanaged,为兼容老配置;
+//   - Default 不在封闭枚举 → 报 "ownership default mode invalid: <m>";
+//   - ByKind[k] 不在枚举 → 报 "ownership.by_kind.<k> invalid mode: <m>";
+//   - ByKind[k] 不在 enabled_kinds → 报 "ownership.by_kind.<k> not in enabled_kinds"。
+func (p *Policy) ValidateOwnership() error {
+	if p.Ownership.Default == "" {
+		p.Ownership.Default = OwnershipUnmanaged
+	}
+	if !p.Ownership.Default.Valid() {
+		return fmt.Errorf("ownership default mode invalid: %q", p.Ownership.Default)
+	}
+	enabled := make(map[string]bool, len(p.ObjectModel.EnabledKinds))
+	for _, k := range p.ObjectModel.EnabledKinds {
+		enabled[k] = true
+	}
+	for k, m := range p.Ownership.ByKind {
+		if !m.Valid() {
+			return fmt.Errorf("ownership.by_kind.%s invalid mode: %q", k, m)
+		}
+		if !enabled[k] {
+			return fmt.Errorf("ownership.by_kind.%s not in enabled_kinds", k)
+		}
+	}
+	return nil
+}
+
 // Policy 是 policy.toml 的完整解析结果。
 type Policy struct {
 	Shell        Shell        `toml:"shell"`

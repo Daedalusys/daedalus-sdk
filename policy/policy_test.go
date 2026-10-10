@@ -70,6 +70,57 @@ func TestOwnershipDefault_ZeroValue(t *testing.T) {
 	}
 }
 
+// === Task 2: fail-closed validation ===
+
+func TestValidateOwnership_DefaultInvalid(t *testing.T) {
+	p := policy.Policy{
+		ObjectModel: policy.ObjectModel{EnabledKinds: []string{"service"}},
+		Ownership:   policy.Ownership{Default: policy.OwnershipMode("managed")},
+	}
+	if err := p.ValidateOwnership(); err == nil {
+		t.Fatal("应报错")
+	}
+}
+
+func TestValidateOwnership_ByKindInvalidMode(t *testing.T) {
+	p := policy.Policy{
+		ObjectModel: policy.ObjectModel{EnabledKinds: []string{"service"}},
+		Ownership: policy.Ownership{
+			Default: policy.OwnershipUnmanaged,
+			ByKind:  map[string]policy.OwnershipMode{"service": "managed"},
+		},
+	}
+	if err := p.ValidateOwnership(); err == nil {
+		t.Fatal("应报错")
+	}
+}
+
+func TestValidateOwnership_ByKindNotEnabled(t *testing.T) {
+	p := policy.Policy{
+		ObjectModel: policy.ObjectModel{EnabledKinds: []string{"service"}}, // 没 package
+		Ownership: policy.Ownership{
+			Default: policy.OwnershipUnmanaged,
+			ByKind:  map[string]policy.OwnershipMode{"package": policy.OwnershipObserve},
+		},
+	}
+	if err := p.ValidateOwnership(); err == nil {
+		t.Fatal("应报错")
+	}
+}
+
+func TestValidateOwnership_DefaultEmptyFillsUnmanaged(t *testing.T) {
+	p := policy.Policy{
+		ObjectModel: policy.ObjectModel{EnabledKinds: []string{"service"}},
+		Ownership:   policy.Ownership{}, // Default 空
+	}
+	if err := p.ValidateOwnership(); err != nil {
+		t.Fatal(err)
+	}
+	if p.Ownership.Default != policy.OwnershipUnmanaged {
+		t.Errorf("Default 空应填充 unmanaged, got %q", p.Ownership.Default)
+	}
+}
+
 // TestLoad_Happy 证明合法策略逐字段透传(而非偷偷回退 Default)。
 func TestLoad_Happy(t *testing.T) {
 	p, err := policy.Load(testdataPath(t, "valid.toml"))
