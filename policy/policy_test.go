@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/Daedalusys/daedalus-sdk/pathguard"
 	"github.com/Daedalusys/daedalus-sdk/policy"
 	"github.com/Daedalusys/daedalus-sdk/shellpolicy"
@@ -26,6 +27,98 @@ func testdataPath(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// === P4 ownership schema (core#2 B2-P3 issue) ===
+
+func TestOwnership_ParseDefault(t *testing.T) {
+	raw := `
+[ownership]
+default = "observe"
+[ownership.by_kind]
+service = "managed/reconcile"
+`
+	var p policy.Policy
+	if _, err := toml.Decode(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Ownership.Default != policy.OwnershipObserve {
+		t.Errorf("default = %q, want observe", p.Ownership.Default)
+	}
+	if p.Ownership.ByKind["service"] != policy.OwnershipManagedReconcile {
+		t.Errorf("by_kind[service] = %q, want managed/reconcile", p.Ownership.ByKind["service"])
+	}
+}
+
+func TestOwnershipMode_Valid(t *testing.T) {
+	for _, m := range []policy.OwnershipMode{
+		policy.OwnershipUnmanaged, policy.OwnershipObserve,
+		policy.OwnershipManagedManual, policy.OwnershipManagedReconcile,
+	} {
+		if !m.Valid() {
+			t.Errorf("%q 应有效", m)
+		}
+	}
+	if policy.OwnershipMode("managed").Valid() {
+		t.Error(`"managed" 应无效`)
+	}
+}
+
+func TestOwnershipDefault_ZeroValue(t *testing.T) {
+	if got := policy.Default().Ownership.Default; got != policy.OwnershipUnmanaged {
+		t.Errorf("Default().Ownership.Default = %q, want unmanaged", got)
+	}
+}
+
+// === Task 2: fail-closed validation ===
+
+func TestValidateOwnership_DefaultInvalid(t *testing.T) {
+	p := policy.Policy{
+		ObjectModel: policy.ObjectModel{EnabledKinds: []string{"service"}},
+		Ownership:   policy.Ownership{Default: policy.OwnershipMode("managed")},
+	}
+	if err := p.ValidateOwnership(); err == nil {
+		t.Fatal("应报错")
+	}
+}
+
+func TestValidateOwnership_ByKindInvalidMode(t *testing.T) {
+	p := policy.Policy{
+		ObjectModel: policy.ObjectModel{EnabledKinds: []string{"service"}},
+		Ownership: policy.Ownership{
+			Default: policy.OwnershipUnmanaged,
+			ByKind:  map[string]policy.OwnershipMode{"service": "managed"},
+		},
+	}
+	if err := p.ValidateOwnership(); err == nil {
+		t.Fatal("应报错")
+	}
+}
+
+func TestValidateOwnership_ByKindNotEnabled(t *testing.T) {
+	p := policy.Policy{
+		ObjectModel: policy.ObjectModel{EnabledKinds: []string{"service"}}, // 没 package
+		Ownership: policy.Ownership{
+			Default: policy.OwnershipUnmanaged,
+			ByKind:  map[string]policy.OwnershipMode{"package": policy.OwnershipObserve},
+		},
+	}
+	if err := p.ValidateOwnership(); err == nil {
+		t.Fatal("应报错")
+	}
+}
+
+func TestValidateOwnership_DefaultEmptyFillsUnmanaged(t *testing.T) {
+	p := policy.Policy{
+		ObjectModel: policy.ObjectModel{EnabledKinds: []string{"service"}},
+		Ownership:   policy.Ownership{}, // Default 空
+	}
+	if err := p.ValidateOwnership(); err != nil {
+		t.Fatal(err)
+	}
+	if p.Ownership.Default != policy.OwnershipUnmanaged {
+		t.Errorf("Default 空应填充 unmanaged, got %q", p.Ownership.Default)
+	}
 }
 
 // TestLoad_Happy 证明合法策略逐字段透传(而非偷偷回退 Default)。
@@ -653,5 +746,34 @@ func TestPolicy_Confirmation_DiskClean_DriftWithRealToml(t *testing.T) {
 	}
 	if real.DiskClean.OldKernelDirPattern != def.DiskClean.OldKernelDirPattern {
 		t.Errorf("diskclean.old_kernel_dir_pattern 漂移: %q vs %q", real.DiskClean.OldKernelDirPattern, def.DiskClean.OldKernelDirPattern)
+	}
+}
+
+// TestPolicy_Ownership_DriftWithRealToml 是 [ownership] 段的镜像 policy.toml
+// 三点漂移测试:解析仓库真实 policy.toml,与 Default() 逐字段一致。
+// 任何修改 policy.toml / Default() 单边的提交必须同步另一侧,否则此测试 fail-closed。
+func TestPolicy_Ownership_DriftWithRealToml(t *testing.T) {
+	t.Setenv(policy.EnvPolicyPath, "")
+	st, err := os.Stat(policy.ProductionPath)
+	if err == nil && !st.IsDir() {
+		t.Skipf("本机存在 %s,无法演练开发态回溯", policy.ProductionPath)
+	}
+	repoPolicy, err := policy.ResolvePath()
+	if err != nil {
+		t.Fatalf("开发态回溯未命中仓库 policy.toml: %v", err)
+	}
+	real, err := policy.Load(repoPolicy)
+	if err != nil {
+		t.Fatalf("镜像 policy.toml 未通过自身校验(含 [ownership] 段): %v", err)
+	}
+	if err := real.ValidateOwnership(); err != nil {
+		t.Fatalf("镜像 policy.toml ValidateOwnership 失败: %v", err)
+	}
+	def := policy.Default()
+	if real.Ownership.Default != def.Ownership.Default {
+		t.Errorf("ownership.default 漂移: %q vs %q", real.Ownership.Default, def.Ownership.Default)
+	}
+	if real.Ownership.ByKind["service"] != def.Ownership.ByKind["service"] {
+		t.Errorf("ownership.by_kind[service] 漂移: %q vs %q", real.Ownership.ByKind["service"], def.Ownership.ByKind["service"])
 	}
 }
