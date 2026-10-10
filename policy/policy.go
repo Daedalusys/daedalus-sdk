@@ -106,6 +106,35 @@ type DiskClean struct {
 	OldKernelDirPattern string   `toml:"old_kernel_dir_pattern"`
 }
 
+// OwnershipMode 是资源管理 ownership 模式的封闭枚举(线协议值,逐字对齐
+// docs/desired-state-projection.md §3 与 VISION.md §10 P4)。
+type OwnershipMode string
+
+// ownership 四档模式(默认最保守)。
+const (
+	OwnershipUnmanaged        OwnershipMode = "unmanaged"
+	OwnershipObserve          OwnershipMode = "observe"
+	OwnershipManagedManual    OwnershipMode = "managed/manual"
+	OwnershipManagedReconcile OwnershipMode = "managed/reconcile"
+)
+
+// Valid 报告模式是否属于封闭枚举;表外值一律拒绝(fail-closed)。
+func (m OwnershipMode) Valid() bool {
+	switch m {
+	case OwnershipUnmanaged, OwnershipObserve,
+		OwnershipManagedManual, OwnershipManagedReconcile:
+		return true
+	}
+	return false
+}
+
+// Ownership 对应 TOML [ownership] 表:资源管理 ownership 模式策略节。
+// Default 是未列入 ByKind 的 kind 使用的默认模式;ByKind 按 kind 粒度覆盖。
+type Ownership struct {
+	Default OwnershipMode            `toml:"default"`
+	ByKind  map[string]OwnershipMode `toml:"by_kind"`
+}
+
 // Policy 是 policy.toml 的完整解析结果。
 type Policy struct {
 	Shell        Shell        `toml:"shell"`
@@ -115,6 +144,7 @@ type Policy struct {
 	Blueprints   Blueprints   `toml:"blueprints"`
 	Confirmation Confirmation `toml:"confirmation"`
 	DiskClean    DiskClean    `toml:"diskclean"`
+	Ownership    Ownership    `toml:"ownership"`
 }
 
 // ResolvePath 按文档优先级解析策略文件路径。
@@ -322,6 +352,10 @@ func Default() *Policy {
 				"/home",
 			},
 			OldKernelDirPattern: "/boot",
+		},
+		// Ownership 默认最保守;未在 policy.toml 中声明则 platform 零期望。
+		Ownership: Ownership{
+			Default: OwnershipUnmanaged,
 		},
 	}
 }

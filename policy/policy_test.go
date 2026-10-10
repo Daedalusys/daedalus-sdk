@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/Daedalusys/daedalus-sdk/pathguard"
 	"github.com/Daedalusys/daedalus-sdk/policy"
 	"github.com/Daedalusys/daedalus-sdk/shellpolicy"
@@ -26,6 +27,47 @@ func testdataPath(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// === P4 ownership schema (core#2 B2-P3 issue) ===
+
+func TestOwnership_ParseDefault(t *testing.T) {
+	raw := `
+[ownership]
+default = "observe"
+[ownership.by_kind]
+service = "managed/reconcile"
+`
+	var p policy.Policy
+	if _, err := toml.Decode(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Ownership.Default != policy.OwnershipObserve {
+		t.Errorf("default = %q, want observe", p.Ownership.Default)
+	}
+	if p.Ownership.ByKind["service"] != policy.OwnershipManagedReconcile {
+		t.Errorf("by_kind[service] = %q, want managed/reconcile", p.Ownership.ByKind["service"])
+	}
+}
+
+func TestOwnershipMode_Valid(t *testing.T) {
+	for _, m := range []policy.OwnershipMode{
+		policy.OwnershipUnmanaged, policy.OwnershipObserve,
+		policy.OwnershipManagedManual, policy.OwnershipManagedReconcile,
+	} {
+		if !m.Valid() {
+			t.Errorf("%q 应有效", m)
+		}
+	}
+	if policy.OwnershipMode("managed").Valid() {
+		t.Error(`"managed" 应无效`)
+	}
+}
+
+func TestOwnershipDefault_ZeroValue(t *testing.T) {
+	if got := policy.Default().Ownership.Default; got != policy.OwnershipUnmanaged {
+		t.Errorf("Default().Ownership.Default = %q, want unmanaged", got)
+	}
 }
 
 // TestLoad_Happy 证明合法策略逐字段透传(而非偷偷回退 Default)。
