@@ -24,13 +24,39 @@ type Object struct {
 }
 
 // Metadata 是对象的名字与标签维度。Generation 是期望版本计数,由改动 spec 的
-// 一方递增,观测方回写 Status.ObservedGeneration 与之比对。
+// 一方递增,观测方回写 Status.ObservedGeneration 与之比对。UID 与 ResourceVersion
+// 是 controller 调和循环可读可填的可选字段:v1 范围 = 字段 + 校验,实际填充
+// 由各 provider 在 set/apply 后回写,BumpGeneration 仅递增 Generation 不动
+// ResourceVersion(后者由版本调和方管理,语义切分)。
 type Metadata struct {
-	Name        string            `json:"name"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Annotations map[string]string `json:"annotations,omitempty"`
-	Generation  int64             `json:"generation"`
+	Name            string            `json:"name"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
+	Generation      int64             `json:"generation"`
+	UID             string            `json:"uid,omitempty"`
+	ResourceVersion string            `json:"resource_version,omitempty"`
+	OwnerReferences []OwnerReference  `json:"owner_references,omitempty"`
+	Finalizers      []Finalizer       `json:"finalizers,omitempty"`
 }
+
+// OwnerReference 指向父对象,用于 ownerRef 链构造父子关系与 GC 拓扑。
+// Kind 必须是已定义的封闭枚举之一(校验由 Validate 集中处理);
+// UID 非空时遵循 Metadata.UID 同规则;APIVersion / Controller /
+// BlockOwnerDeletion 沿用 k8s OwnerReference 字段名,但语义对齐 Daedalus 现状
+// —— GC 逻辑不在 v1 范围(归 P4),字段只是"在场 + 可校验"。
+type OwnerReference struct {
+	APIVersion         string `json:"api_version,omitempty"`
+	Kind               Kind   `json:"kind"`
+	Name               string `json:"name"`
+	UID                string `json:"uid,omitempty"`
+	Controller         bool   `json:"controller,omitempty"`
+	BlockOwnerDeletion bool   `json:"block_owner_deletion,omitempty"`
+}
+
+// Finalizer 是延迟删除的钩子名(惯例:反向 DNS + 行为短词,如
+// "daedalus.core/protect")。本层只钉类型与增删查;finalizer 触发 GC 的实际
+// 控制器逻辑归 P4。
+type Finalizer string
 
 // Status 是观测态载荷:版本比对 + 条件列表 + provider 原始属性
 // (如 systemctl 键值原文)。
@@ -135,4 +161,104 @@ func (m Metadata) MatchLabels(sel map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// BumpGeneration 递增期望版本并返回新值。ResourceVersion 由版本调和方管理,
+// 不在本方法动 —— 期望方写 Generation,观测方写 Status.ObservedGeneration 与之
+// 比对;ResourceVersion 是 apiserver 内部单调号,提供者写 spec 时由 provider
+// 自行回填。两者职责切分,BumpGeneration 不得越界。
+func (m *Metadata) BumpGeneration() int64 {
+	m.Generation++
+	return m.Generation
+}
+
+// SetLabel 写入标签(key 非空;nil map 惰性初始化)。空 key 视为语义错误,直接
+// panic —— label 是 label selector 的输入,空 key 让 MatchLabels 永远命中,
+// 与"通过 label 筛选"的契约冲突,运行时不能容忍。
+func (m *Metadata) SetLabel(key, value string) {
+	if key == "" {
+		panic("objectmodel: SetLabel key 不得为空")
+	}
+	if m.Labels == nil {
+		m.Labels = make(map[string]string)
+	}
+	m.Labels[key] = value
+}
+
+// SetAnnotation 写入注解(nil map 惰性初始化)。annotation 不进 label selector,
+// 语义与 label 解耦,空 key 不 panic 但也不写入 —— 与 SetLabel 行为差异固定,
+// 避免两者语义混淆。
+func (m *Metadata) SetAnnotation(key, value string) {
+	if key == "" {
+		return
+	}
+	if m.Annotations == nil {
+		m.Annotations = make(map[string]string)
+	}
+	m.Annotations[key] = value
+}
+
+// HasLabel 报告 key 是否存在(nil Labels 视为无命中,安全)。值接收器与既有
+// Label / MatchLabels 风格对齐(读侧不需指针)。
+func (m Metadata) HasLabel(key string) bool {
+	_, ok := m.Labels[key]
+	return ok
+}
+
+// AddFinalizer 追加 finalizer(已存在返回 false,新增返回 true)。空串视作语义错,
+// 拒绝 —— finalizer 是 controller 钩子契约,空字符串让 GC 永远命中"未保护"
+// 分支,运行时不能容忍。
+func (m *Metadata) AddFinalizer(f Finalizer) bool {
+	if f == "" {
+		return false
+	}
+	for _, existing := range m.Finalizers {
+		if existing == f {
+			return false
+		}
+	}
+	m.Finalizers = append(m.Finalizers, f)
+	return true
+}
+
+// RemoveFinalizer 移除 finalizer(已存在返回 true,不在返回 false)。
+func (m *Metadata) RemoveFinalizer(f Finalizer) bool {
+	for i, existing := range m.Finalizers {
+		if existing != f {
+			continue
+		}
+		m.Finalizers = append(m.Finalizers[:i], m.Finalizers[i+1:]...)
+		return true
+	}
+	return false
+}
+
+// HasFinalizer 报告 finalizer 是否存在。
+func (m *Metadata) HasFinalizer(f Finalizer) bool {
+	for _, existing := range m.Finalizers {
+		if existing == f {
+			return true
+		}
+	}
+	return false
+}
+
+// FilterByLabels 返回 metadata 匹配 sel 全部键值对的对象(顺序与入参一致)。
+// sel 空 / nil → 返回全部,语义与 MatchLabels("空选择器恒真")对齐。**返回**的切片
+// 永远是入参的副本(空选择器路径显式 slices.Clone),消费方排序 / 二次筛选不得
+// 回灌原集合。
+func FilterByLabels(objs []Object, sel map[string]string) []Object {
+	if len(objs) == 0 {
+		return []Object{}
+	}
+	if len(sel) == 0 {
+		return slices.Clone(objs)
+	}
+	out := make([]Object, 0, len(objs))
+	for _, o := range objs {
+		if o.Metadata.MatchLabels(sel) {
+			out = append(out, o)
+		}
+	}
+	return out
 }

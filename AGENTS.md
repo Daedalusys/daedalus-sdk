@@ -61,8 +61,8 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 | `shellpolicy.AllowCommands` | `shellpolicy/allow.go` | 15 命令权威实现;CLEAN_ENV + 30s + rc 126/124 |
 | `pathguard.ValidatePath` / `pathguard.ValidateWritePath` | `pathguard/pathguard.go` | 读档校验(ALLOWED_DIRS 前缀 + realpath 防逃逸);写档二档额外拒写只读系统目录(`/proc`/`/sys`/`/boot`/`/usr`/`/etc`/`/var/lib/rpm`)+ 敏感文件通配(`/etc/shadow`/`/etc/passwd`/`/etc/sudoers*`/`/etc/pam.d/`)+ 强制完整 realpath |
 | `plugin.Manifest` / `plugin.Pack` | `plugin/manifest.go` `plugin/pack.go` | 规范化自摘要 + 逐条目 sha256 + zip-slip 防线 |
-| `objectmodel.Resource` / `Kind` | `objectmodel/objectmodel.go` | 三字段元组 (kind/name/desired_state);Kind 封闭枚举 7 类 |
-| `objectmodel.Object` / `Condition` | `objectmodel/envelope.go` | spec/status 信封;`Resource.Object()` 与 `ServiceState.Object()` 双投影,`UpsertCondition`/`MatchLabels` 读写侧 API;`internal/controller` 的同名类型是本包别名 |
+| `objectmodel.Resource` / `Kind` / `AllKinds` | `objectmodel/objectmodel.go` | 三字段元组 (kind/name/desired_state);Kind 封闭枚举 7 类 + 漂移金丝雀锁 |
+| `objectmodel.Object` / `Metadata` / `Condition` / `OwnerReference` / `Finalizer` | `objectmodel/envelope.go` + `objectmodel/validate.go` | spec/status 信封(全字段:UID / ResourceVersion / OwnerReferences / Finalizers);`Resource.Object()` 与 `ServiceState.Object()` 双投影;writer `BumpGeneration` / `SetLabel` / `SetAnnotation` / `AddFinalizer` / `RemoveFinalizer`,reader `MatchLabels` / `FilterByLabels` / `HasLabel`,校验 `Metadata.Validate` / `Object.Validate`(sdk#1 P3);`internal/controller` 的同名类型是本包别名 |
 | `blueprint.Registry` / `blueprint.ConfirmToken` | `blueprint/registry.go` `confirm_token.go` | 蓝图加载 + 一次性消费令牌 |
 | `state.Append` / `state.StateEntry` | `state/state.go` | state.jsonl 追加;payload 序列化为 `objectmodel.ServiceState` |
 | `dirs.State` / `dirs.Tx` | `dirs/dirs.go` | state/tx 根路径解析 |
@@ -127,6 +127,7 @@ go test -run TestGolden ./audit/...
 ## NOTES
 - 本仓与 `daedalus-core` (Daedalusys)、`daedalus-plugins` 经 `go.work` 平级桥接;**单仓发布,跨仓协作**。
 - 新增 SDK 包 = 在根加新目录 + 同步更新 README「包索引」表;新增 Kind 必经 `objectmodel/Kind` 常量 + `kindRegistry` + 校验分支 + `policy.toml [objectmodel].enabled_kinds` 三处漂移测试。
+- 新增 `objectmodel.Metadata` 字段 = 在结构末尾追加 + `omitempty` + 既有零值金样字面量不动 + `TestObject_GoldenRoundTrip_FullMetadata` 与 `daedalus-core/internal/controller/types_test.go` 的 `TestObject_EnvelopeBytes_MatchSDK` 两侧同步更新(改一处致另一侧编译失败)。
 - Provider/Slot 架构(daedalus-sdk#2,原 #42):`slot/` `secretprovider/` `memoryprovider/` 已填实契约(语义事实源 `docs/provider-slot.md`);modelprovider/agentprovider/transportprovider 仍为占位,**请勿在这 3 个目录写 Go 代码**。
 - 测试布局: `*_test.go` 随包;`testdata/` 内是金样向量 / 配置文件。
 - SDK 公开面**不豁免** `daedalus-core/AGENTS.md` 的 ANTI-PATTERNS 条款(中文注释 / 零 image 残留 / 审计链经 CLI 等)。

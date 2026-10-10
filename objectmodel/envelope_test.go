@@ -197,3 +197,321 @@ func TestServiceState_JSONBackwardCompat(t *testing.T) {
 		t.Fatalf("旧行回解结果错误: %#v", st)
 	}
 }
+
+// TestMetadata_BumpGeneration 锁定 BumpGeneration 递增期望版本并返回新值;
+// 零值、正数、大数三种 case 覆盖。
+func TestMetadata_BumpGeneration(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		init int64
+		want int64
+	}{
+		{"零值递增", 0, 1},
+		{"正数递增", 7, 8},
+		{"大数递增", 1<<62 - 1, 1 << 62},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := &Metadata{Name: "x", Generation: tc.init}
+			got := m.BumpGeneration()
+			if got != tc.want {
+				t.Fatalf("返回值 = %d, want %d", got, tc.want)
+			}
+			if m.Generation != tc.want {
+				t.Fatalf("Generation 字段未更新: got %d, want %d", m.Generation, tc.want)
+			}
+		})
+	}
+}
+
+// BumpGeneration 不得触碰 ResourceVersion(后者由 set spec 后的版本调和方递增,
+// BumpGeneration 是 tx apply 阶段的"我期望 v+1"信号)。
+func TestMetadata_BumpGeneration_DoesNotTouchResourceVersion(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x", Generation: 5, ResourceVersion: "rv-7"}
+	m.BumpGeneration()
+	if m.ResourceVersion != "rv-7" {
+		t.Fatalf("ResourceVersion 被改: got %q, want %q", m.ResourceVersion, "rv-7")
+	}
+}
+
+// SetLabel 在 nil map 上必须惰性初始化,不得 panic。
+func TestMetadata_SetLabel_NilMap(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x"} // Labels == nil
+	m.SetLabel("app", "sshd")
+	if m.Labels["app"] != "sshd" {
+		t.Fatalf("SetLabel 未生效: %#v", m.Labels)
+	}
+}
+
+func TestMetadata_SetLabel(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x", Labels: map[string]string{"old": "v"}}
+	m.SetLabel("app", "sshd")
+	if m.Labels["app"] != "sshd" || m.Labels["old"] != "v" {
+		t.Fatalf("SetLabel 覆盖语义错误: %#v", m.Labels)
+	}
+}
+
+func TestMetadata_SetLabel_EmptyKeyPanics(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x"}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("空 key 必须 panic")
+		}
+	}()
+	m.SetLabel("", "v")
+}
+
+func TestMetadata_SetAnnotation_NilMap(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x"}
+	m.SetAnnotation("owner", "ops")
+	if m.Annotations["owner"] != "ops" {
+		t.Fatalf("SetAnnotation 未生效: %#v", m.Annotations)
+	}
+}
+
+func TestMetadata_HasLabel(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x", Labels: map[string]string{"app": "sshd"}}
+	if !m.HasLabel("app") {
+		t.Fatal("存在的 key 必须命中")
+	}
+	if m.HasLabel("missing") {
+		t.Fatal("不存在的 key 不得命中")
+	}
+	// nil map 上不得 panic。
+	var nilMap Metadata
+	if nilMap.HasLabel("any") {
+		t.Fatal("nil Labels 必须返回 false")
+	}
+}
+
+// 空值 UID / ResourceVersion 在 JSON 里不出现(omitempty);既有零值形态字节不变。
+func TestMetadata_UID_ResourceVersion_OmitEmpty(t *testing.T) {
+	t.Parallel()
+	m := Metadata{Name: "x"}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"x","generation":0}`
+	if string(b) != want {
+		t.Fatalf("零值形态漂移:\n got %s\nwant %s", b, want)
+	}
+}
+
+// 非空 UID / ResourceVersion 在 JSON 出现且键名 = uid / resource_version,顺序在
+// generation 之后(字段声明序)。
+func TestMetadata_UID_ResourceVersion_RoundTrip(t *testing.T) {
+	t.Parallel()
+	m := Metadata{
+		Name:            "sshd.service",
+		Generation:      7,
+		UID:             "abc-123",
+		ResourceVersion: "rv-9",
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"name":"sshd.service","generation":7,"uid":"abc-123","resource_version":"rv-9"}`
+	if string(b) != want {
+		t.Fatalf("序列化漂移:\n got %s\nwant %s", b, want)
+	}
+	var back Metadata
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m, back) {
+		t.Fatalf("往返不等: got %#v want %#v", back, m)
+	}
+}
+
+// FilterByLabels:子集匹配、空选择器恒真、顺序保持、空入参、空出参非 nil。
+func TestFilterByLabels(t *testing.T) {
+	t.Parallel()
+	objs := []Object{
+		{Kind: KindService, Metadata: Metadata{Name: "a", Labels: map[string]string{"app": "sshd", "tier": "system"}}},
+		{Kind: KindService, Metadata: Metadata{Name: "b", Labels: map[string]string{"app": "nginx", "tier": "system"}}},
+		{Kind: KindService, Metadata: Metadata{Name: "c", Labels: map[string]string{"app": "sshd", "tier": "user"}}},
+	}
+
+	t.Run("子集匹配", func(t *testing.T) {
+		t.Parallel()
+		got := FilterByLabels(objs, map[string]string{"app": "sshd"})
+		if len(got) != 2 || got[0].Metadata.Name != "a" || got[1].Metadata.Name != "c" {
+			t.Fatalf("子集匹配错误: %#v", got)
+		}
+	})
+
+	t.Run("空选择器恒真", func(t *testing.T) {
+		t.Parallel()
+		got := FilterByLabels(objs, nil)
+		if len(got) != 3 {
+			t.Fatalf("空选择器应返回全部: got %d", len(got))
+		}
+	})
+
+	// 空选择器必须返回副本,不得与原切片共享底层数组(Review Focus #2)。
+	t.Run("空选择器返回副本", func(t *testing.T) {
+		t.Parallel()
+		got := FilterByLabels(objs, nil)
+		got[0].Metadata.Name = "tampered"
+		if objs[0].Metadata.Name == "tampered" {
+			t.Fatal("空选择器返回了原切片别名")
+		}
+	})
+
+	t.Run("空入参", func(t *testing.T) {
+		t.Parallel()
+		got := FilterByLabels(nil, map[string]string{"app": "x"})
+		if got == nil {
+			t.Fatal("空入参不得返回 nil 切片(消费方 range 安全)")
+		}
+		if len(got) != 0 {
+			t.Fatalf("空入参应返回空切片: got %d", len(got))
+		}
+	})
+}
+
+// TestOwnerReference_RoundTrip 锁定 OwnerReference 字段顺序与 omitempty 语义:
+// api_version / uid / controller / block_owner_deletion 都 omitempty;kind / name 必填且恒出。
+func TestOwnerReference_RoundTrip(t *testing.T) {
+	t.Parallel()
+	obj := Object{
+		Kind: KindService,
+		// Spec 显式设置为 json.RawMessage("null") 以让 marshal+unmarshal 往返
+		// DeepEqual 成立(nil json.RawMessage 会被 Unmarshal 为 []byte("null"),
+		// 与 nil 不等 —— Go 标准库行为,非本测试可调控)。
+		Spec: json.RawMessage("null"),
+		Metadata: Metadata{
+			Name: "child",
+			OwnerReferences: []OwnerReference{{
+				APIVersion:         "v1",
+				Kind:               KindService,
+				Name:               "parent",
+				UID:                "parent-uid-1",
+				Controller:         true,
+				BlockOwnerDeletion: true,
+			}},
+		},
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"api_version":"","kind":"service","metadata":{"name":"child","generation":0,"owner_references":[{"api_version":"v1","kind":"service","name":"parent","uid":"parent-uid-1","controller":true,"block_owner_deletion":true}]},"spec":null,"status":{"observed_generation":0}}`
+	if string(b) != want {
+		t.Fatalf("OwnerReference 序列化漂移:\n got %s\nwant %s", b, want)
+	}
+	var back Object
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(obj, back) {
+		t.Fatalf("往返不等: got %#v want %#v", back, obj)
+	}
+}
+
+// TestObject_GoldenRoundTrip_FullMetadata 锁全字段(UID / ResourceVersion /
+// OwnerReferences / Finalizers)的字节形态。该 want 字面量同时被
+// daedalus-core/internal/controller/types_test.go 引用(Review Focus #5),
+// 任何一侧漂移另一侧编译失败。
+func TestObject_GoldenRoundTrip_FullMetadata(t *testing.T) {
+	t.Parallel()
+	obj := Object{
+		APIVersion: "v1",
+		Kind:       KindService,
+		Metadata: Metadata{
+			Name:            "sshd.service",
+			Labels:          map[string]string{"app": "sshd"},
+			Annotations:     map[string]string{"owner": "daedalus"},
+			Generation:      7,
+			UID:             "sshd-uid-1",
+			ResourceVersion: "rv-9",
+			OwnerReferences: []OwnerReference{{Kind: KindService, Name: "parent.service"}},
+			Finalizers:      []Finalizer{"daedalus.core/protect"},
+		},
+		Spec: json.RawMessage(`{"desired_state":"active"}`),
+		Status: Status{
+			ObservedGeneration: 6,
+			Conditions: []Condition{{
+				Type:               "Ready",
+				Status:             ConditionTrue,
+				Reason:             "AsExpected",
+				Message:            "unit active",
+				LastTransitionTime: time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC),
+			}},
+			Properties: map[string]string{"ActiveState": "active"},
+		},
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"api_version":"v1","kind":"service","metadata":{"name":"sshd.service","labels":{"app":"sshd"},"annotations":{"owner":"daedalus"},"generation":7,"uid":"sshd-uid-1","resource_version":"rv-9","owner_references":[{"kind":"service","name":"parent.service"}],"finalizers":["daedalus.core/protect"]},"spec":{"desired_state":"active"},"status":{"observed_generation":6,"conditions":[{"type":"Ready","status":"True","reason":"AsExpected","message":"unit active","last_transition_time":"2026-10-10T00:00:00Z"}],"properties":{"ActiveState":"active"}}}`
+	if string(b) != want {
+		t.Fatalf("Envelope 全字段金样漂移:\n got %s\nwant %s", b, want)
+	}
+
+	var back Object
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(obj, back) {
+		t.Fatalf("往返不等:\n got %#v\nwant %#v", back, obj)
+	}
+}
+
+// TestUpsertCondition_SameStatusDoesNotRefreshTime 钉死"同状态写回不刷转换时刻"
+// 行为,防止 controller P4 落地时被静默刷新(Review Focus #3)。
+func TestUpsertCondition_SameStatusDoesNotRefreshTime(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	st := Status{Conditions: []Condition{{
+		Type: "Ready", Status: ConditionTrue, Reason: "R1", Message: "M1", LastTransitionTime: base,
+	}}}
+	st.UpsertCondition(Condition{
+		Type: "Ready", Status: ConditionTrue, Reason: "R2", Message: "M2", LastTransitionTime: time.Now().UTC(),
+	})
+	if !st.Conditions[0].LastTransitionTime.Equal(base) {
+		t.Fatalf("同状态写回刷了 LastTransitionTime: got %v, want %v",
+			st.Conditions[0].LastTransitionTime, base)
+	}
+	if st.Conditions[0].Reason != "R2" || st.Conditions[0].Message != "M2" {
+		t.Fatalf("同状态写回应更新 reason/message: got %#v", st.Conditions[0])
+	}
+}
+
+// TestFinalizer_AddRemoveHas 锁定 finalizer 增删查语义:首次新增返回 true,重复返回
+// false;Remove 已存在返回 true,不在返回 false;Has 仅查存在。
+func TestFinalizer_AddRemoveHas(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x"}
+
+	if !m.AddFinalizer("protect.example.com/cleanup") {
+		t.Fatal("首次 AddFinalizer 应返回 true")
+	}
+	if m.AddFinalizer("protect.example.com/cleanup") {
+		t.Fatal("重复 AddFinalizer 应返回 false")
+	}
+	if !m.HasFinalizer("protect.example.com/cleanup") {
+		t.Fatal("已添加 finalizer 必须命中 HasFinalizer")
+	}
+
+	if !m.RemoveFinalizer("protect.example.com/cleanup") {
+		t.Fatal("存在的 finalizer Remove 必须返回 true")
+	}
+	if m.RemoveFinalizer("protect.example.com/cleanup") {
+		t.Fatal("不存在的 finalizer Remove 必须返回 false")
+	}
+	if m.HasFinalizer("protect.example.com/cleanup") {
+		t.Fatal("移除后不得命中")
+	}
+}
