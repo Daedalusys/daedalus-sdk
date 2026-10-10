@@ -237,6 +237,61 @@ func TestMetadata_BumpGeneration_DoesNotTouchResourceVersion(t *testing.T) {
 	}
 }
 
+// SetLabel 在 nil map 上必须惰性初始化,不得 panic。
+func TestMetadata_SetLabel_NilMap(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x"} // Labels == nil
+	m.SetLabel("app", "sshd")
+	if m.Labels["app"] != "sshd" {
+		t.Fatalf("SetLabel 未生效: %#v", m.Labels)
+	}
+}
+
+func TestMetadata_SetLabel(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x", Labels: map[string]string{"old": "v"}}
+	m.SetLabel("app", "sshd")
+	if m.Labels["app"] != "sshd" || m.Labels["old"] != "v" {
+		t.Fatalf("SetLabel 覆盖语义错误: %#v", m.Labels)
+	}
+}
+
+func TestMetadata_SetLabel_EmptyKeyPanics(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x"}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("空 key 必须 panic")
+		}
+	}()
+	m.SetLabel("", "v")
+}
+
+func TestMetadata_SetAnnotation_NilMap(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x"}
+	m.SetAnnotation("owner", "ops")
+	if m.Annotations["owner"] != "ops" {
+		t.Fatalf("SetAnnotation 未生效: %#v", m.Annotations)
+	}
+}
+
+func TestMetadata_HasLabel(t *testing.T) {
+	t.Parallel()
+	m := &Metadata{Name: "x", Labels: map[string]string{"app": "sshd"}}
+	if !m.HasLabel("app") {
+		t.Fatal("存在的 key 必须命中")
+	}
+	if m.HasLabel("missing") {
+		t.Fatal("不存在的 key 不得命中")
+	}
+	// nil map 上不得 panic。
+	var nilMap Metadata
+	if nilMap.HasLabel("any") {
+		t.Fatal("nil Labels 必须返回 false")
+	}
+}
+
 // 空值 UID / ResourceVersion 在 JSON 里不出现(omitempty);既有零值形态字节不变。
 func TestMetadata_UID_ResourceVersion_OmitEmpty(t *testing.T) {
 	t.Parallel()
@@ -276,4 +331,51 @@ func TestMetadata_UID_ResourceVersion_RoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(m, back) {
 		t.Fatalf("往返不等: got %#v want %#v", back, m)
 	}
+}
+
+// FilterByLabels:子集匹配、空选择器恒真、顺序保持、空入参、空出参非 nil。
+func TestFilterByLabels(t *testing.T) {
+	t.Parallel()
+	objs := []Object{
+		{Kind: KindService, Metadata: Metadata{Name: "a", Labels: map[string]string{"app": "sshd", "tier": "system"}}},
+		{Kind: KindService, Metadata: Metadata{Name: "b", Labels: map[string]string{"app": "nginx", "tier": "system"}}},
+		{Kind: KindService, Metadata: Metadata{Name: "c", Labels: map[string]string{"app": "sshd", "tier": "user"}}},
+	}
+
+	t.Run("子集匹配", func(t *testing.T) {
+		t.Parallel()
+		got := FilterByLabels(objs, map[string]string{"app": "sshd"})
+		if len(got) != 2 || got[0].Metadata.Name != "a" || got[1].Metadata.Name != "c" {
+			t.Fatalf("子集匹配错误: %#v", got)
+		}
+	})
+
+	t.Run("空选择器恒真", func(t *testing.T) {
+		t.Parallel()
+		got := FilterByLabels(objs, nil)
+		if len(got) != 3 {
+			t.Fatalf("空选择器应返回全部: got %d", len(got))
+		}
+	})
+
+	// 空选择器必须返回副本,不得与原切片共享底层数组(Review Focus #2)。
+	t.Run("空选择器返回副本", func(t *testing.T) {
+		t.Parallel()
+		got := FilterByLabels(objs, nil)
+		got[0].Metadata.Name = "tampered"
+		if objs[0].Metadata.Name == "tampered" {
+			t.Fatal("空选择器返回了原切片别名")
+		}
+	})
+
+	t.Run("空入参", func(t *testing.T) {
+		t.Parallel()
+		got := FilterByLabels(nil, map[string]string{"app": "x"})
+		if got == nil {
+			t.Fatal("空入参不得返回 nil 切片(消费方 range 安全)")
+		}
+		if len(got) != 0 {
+			t.Fatalf("空入参应返回空切片: got %d", len(got))
+		}
+	})
 }

@@ -150,3 +150,56 @@ func (m *Metadata) BumpGeneration() int64 {
 	m.Generation++
 	return m.Generation
 }
+
+// SetLabel 写入标签(key 非空;nil map 惰性初始化)。空 key 视为语义错误,直接
+// panic —— label 是 label selector 的输入,空 key 让 MatchLabels 永远命中,
+// 与"通过 label 筛选"的契约冲突,运行时不能容忍。
+func (m *Metadata) SetLabel(key, value string) {
+	if key == "" {
+		panic("objectmodel: SetLabel key 不得为空")
+	}
+	if m.Labels == nil {
+		m.Labels = make(map[string]string)
+	}
+	m.Labels[key] = value
+}
+
+// SetAnnotation 写入注解(nil map 惰性初始化)。annotation 不进 label selector,
+// 语义与 label 解耦,空 key 不 panic 但也不写入 —— 与 SetLabel 行为差异固定,
+// 避免两者语义混淆。
+func (m *Metadata) SetAnnotation(key, value string) {
+	if key == "" {
+		return
+	}
+	if m.Annotations == nil {
+		m.Annotations = make(map[string]string)
+	}
+	m.Annotations[key] = value
+}
+
+// HasLabel 报告 key 是否存在(nil Labels 视为无命中,安全)。值接收器与既有
+// Label / MatchLabels 风格对齐(读侧不需指针)。
+func (m Metadata) HasLabel(key string) bool {
+	_, ok := m.Labels[key]
+	return ok
+}
+
+// FilterByLabels 返回 metadata 匹配 sel 全部键值对的对象(顺序与入参一致)。
+// sel 空 / nil → 返回全部,语义与 MatchLabels("空选择器恒真")对齐。**返回**的切片
+// 永远是入参的副本(空选择器路径显式 slices.Clone),消费方排序 / 二次筛选不得
+// 回灌原集合。
+func FilterByLabels(objs []Object, sel map[string]string) []Object {
+	if len(objs) == 0 {
+		return []Object{}
+	}
+	if len(sel) == 0 {
+		return slices.Clone(objs)
+	}
+	out := make([]Object, 0, len(objs))
+	for _, o := range objs {
+		if o.Metadata.MatchLabels(sel) {
+			out = append(out, o)
+		}
+	}
+	return out
+}
