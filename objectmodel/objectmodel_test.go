@@ -278,7 +278,7 @@ func TestObjectModel_Drift(t *testing.T) {
 		registry:     AllKinds(),
 		defaultKinds: policy.Default().ObjectModel.EnabledKinds,
 		tomlKinds:    loaded.ObjectModel.EnabledKinds,
-		canary:       []string{"service", "package"}, // v1 冻结字面量:service 与 package 启用
+		canary:       []string{"service", "package", "task", "container", "policy"}, // v1 冻结字面量:五类启用(2026-10 拉起 task + container + policy kind provider)
 	})
 
 	// --- 负例扩展(T1 已钉 "machine"/"Service",此处补足全部大小写变体) ---
