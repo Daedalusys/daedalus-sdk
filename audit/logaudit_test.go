@@ -181,3 +181,67 @@ for i, raw in enumerate(raw_lines, 1):
 
 print("PYTHON REPLAY OK", len(raw_lines))
 `
+
+// === 轮转适配(2026-10-14 audit-state-rotation) ===
+
+// TestLogAudit_FirstAppendAfterRotationSeedsFromTail 验证:轮转后活跃文件为空时,
+// 首条 append 的 prev_hash 取 <logPath>.tail(上一段尾哈希),而非 GenesisHash,
+// 保证链跨段连续。
+func TestLogAudit_FirstAppendAfterRotationSeedsFromTail(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "audit.jsonl")
+	// 模拟"轮转后":活跃文件存在但为空,旁有 .tail 写好上一段尾哈希。
+	if f, err := os.Create(p); err != nil {
+		t.Fatal(err)
+	} else if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	const prevTail = "1111111111111111111111111111111111111111111111111111111111111111"
+	if err := os.WriteFile(p+".tail", []byte(prevTail+"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := LogAudit(Entry{Tool: "x", LogPath: p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.PrevHash != prevTail {
+		t.Fatalf("空文件首条应从 .tail 播种: prev=%s want %s", rec.PrevHash, prevTail)
+	}
+	if rec.EntryHash == "" || rec.PrevHash == GenesisHash {
+		t.Fatalf("不应退回 GenesisHash")
+	}
+}
+
+// TestLogAudit_CreatesFileMode0640 验证轮转窗口内新建的审计文件恒 0640,
+// 不因 O_CREATE 回落成 0644。
+func TestLogAudit_CreatesFileMode0640(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "audit.jsonl")
+	if _, err := LogAudit(Entry{Tool: "x", LogPath: p}); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o640 {
+		t.Fatalf("新建审计文件权限 = %o, want 640", got)
+	}
+}
+
+// TestLogAudit_RejectsSymlink 验证 O_NOFOLLOW:活跃路径是符号链接时拒绝打开,
+// 防止"符号链接换址"把审计写到别处。
+func TestLogAudit_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.jsonl")
+	if err := os.WriteFile(target, nil, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "audit.jsonl")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LogAudit(Entry{Tool: "x", LogPath: link}); err == nil {
+		t.Fatal("符号链接应被 O_NOFOLLOW 拒绝, got nil")
+	}
+}
