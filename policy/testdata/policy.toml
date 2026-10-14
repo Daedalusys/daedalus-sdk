@@ -51,11 +51,11 @@ log_path = "/var/log/daedalus/audit.jsonl"
 # 对象模型资源 kind 的正向启用白名单(与 [shell]/[fs]/[audit] 并列的第四策略节):
 # 声明式列出**启用**哪些 kind,未列入即未启用;具体 kind 语义与校验规则由
 # 单一事实源 daedalus/core/internal/objectmodel/objectmodel.go 定义
-# (计划 .omo/plans/aios-object-model-alignment.md 的 Object Model 段与决策 25;
-# v1 仅 service 有 provider,其余为保留枚举成员)。
+# (v1 五类 kind 均有 provider:service / package / task / container / policy;
+# capability / transaction 仍为保留枚举位)。
 # fail-closed:空列表视为损坏策略,Go 服务器启动时拒绝加载。
 # 本值与 internal/policy.Default() 及 objectmodel 常量由防漂移测试三点钉死。
-enabled_kinds = ["service", "package"]
+enabled_kinds = ["service", "package", "task", "container", "policy"]
 
 [blueprints]
 # 蓝图(blueprint)渲染/校验/重载/密钥来源策略节(与 [shell]/[fs]/[audit]/

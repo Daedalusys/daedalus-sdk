@@ -16,6 +16,7 @@
 package policy
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -51,6 +52,21 @@ var DevRelPaths = []string{
 // 回退 Default() 需 DAEDALUS_POLICY_MODE=development 显式 opt-in);
 // 与"文件存在但损坏/字段缺失"(真解析错误)严格区分,后者必须拒绝启动。
 var ErrNotFound = errors.New("policy: 未找到 policy.toml(生产路径与仓库回溯均未命中)")
+
+// policyDisabledSentinel 是 daedalus-tx policy.set absent Apply 写入的首行标记。
+// policy.Load 检测到它即返回 ErrDisabled(不是 ErrNotFound,不是解析错)。
+// 严格首行匹配:哨兵前面的任何注释/空行都不算 disabled(防"包装过的哨兵"绕过)。
+const policyDisabledSentinel = "# daedalus:disabled\n"
+
+// DisabledSentinel 是 policyDisabledSentinel 的导出形态:daedalus-core 的
+// policy.set 适配器必须写入**逐字节一致**的哨兵,故经本常量跨仓共享,避免两边
+// 手写字面量漂移。SDK 仍是哨兵字节的唯一事实源。
+const DisabledSentinel = policyDisabledSentinel
+
+// ErrDisabled 表示策略文件被 daedalus-tx 显式停用(kill switch),与"缺失"、
+// "损坏"严格区分:调用方 fail-closed 拒启,且**不**走 DAEDALUS_POLICY_MODE=development
+// 的 Default() 回退(那是 ErrNotFound 的语义)。
+var ErrDisabled = errors.New("policy: 策略被 daedalus-tx 显式停用 (kill switch)")
 
 type Shell struct {
 	AllowedCommands     []string          `toml:"allowed_commands"`
@@ -217,6 +233,12 @@ func Load(path string) (*Policy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("policy: 读取 %s 失败: %w", path, err)
 	}
+	// 首行严格匹配 disabled 哨兵(在解析之前短路):表示本文件由 policy.set absent
+	// 主动停用。与"缺失"(ErrNotFound)严格区分——后者可经 dev opt-in 回退 Default(),
+	// disabled 是显式 kill switch,永远 fail-closed。
+	if bytes.HasPrefix(data, []byte(policyDisabledSentinel)) {
+		return nil, ErrDisabled
+	}
 	var p Policy
 	meta, err := toml.Decode(string(data), &p)
 	if err != nil {
@@ -352,7 +374,7 @@ func Default() *Policy {
 			LogPath: "/var/log/daedalus/audit.jsonl",
 		},
 		ObjectModel: ObjectModel{
-			EnabledKinds: []string{"service", "package"},
+			EnabledKinds: []string{"service", "package", "task", "container", "policy"},
 		},
 		Blueprints: Blueprints{
 			OutputDirs:        []string{"/etc/nginx/conf.d", "/etc/haproxy", "/etc/postgresql", "/etc/redis"},
