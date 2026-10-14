@@ -48,6 +48,12 @@ func OpenLog(logPath string, order LogOrder) (LogReader, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(segs) == 0 {
+		// 无归档:活跃文件必须存在(否则与旧单文件读一致地报错,而非静默空)。
+		if _, serr := os.Stat(logPath); serr != nil {
+			return nil, fmt.Errorf("audit: 打开日志失败: %w", serr)
+		}
+	}
 	var paths []string
 	switch order {
 	case OldestFirst:
