@@ -340,3 +340,24 @@ func TestStateLog_RotatesAndReadCrossesGenerations(t *testing.T) {
 		t.Fatalf("want 5 跨代, got %d", len(entries))
 	}
 }
+
+// TestStateRead_ActiveMissingWithPrevGen:活跃缺失(刚轮转窗口)+ .1 存在时,
+// Read 退化只读 .1,不返回空(避免 drift 假阳性)。
+func TestStateRead_ActiveMissingWithPrevGen(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.jsonl")
+	t.Setenv("DAEDALUS_STATE_PATH", path)
+	if err := Log(stEntry(0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, prevGenPath(path)); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := Read(time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("活跃缺失时应从 .1 读到 1 条, got %d", len(entries))
+	}
+}

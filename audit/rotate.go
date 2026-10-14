@@ -67,11 +67,13 @@ func Rotate(opts RotateOptions) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("audit: 轮转打开活跃文件失败: %w", err)
 	}
-	defer f.Close()
+	// 二重释放防护:defer 闭包拍下变量指针;手动 close 后 f = nil,
+	// defer 跳过(否则会在 fd 被后续 open 复用时关错文件)。
+	defer func() { if f != nil { _ = f.Close() } }()
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return false, fmt.Errorf("audit: 轮转 flock 失败: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() { if f != nil { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) } }()
 
 	seg, err := scanSegmentFileHandle(f)
 	if err != nil {
@@ -121,6 +123,12 @@ func Rotate(opts RotateOptions) (bool, error) {
 		// 尽力而为:已完成的轮转不回滚,仅让调用方可见(由 CLI 记 stderr)。
 		fmt.Fprintf(os.Stderr, "audit: 警告: 恢复 append-only 失败: %v\n", err)
 	}
+
+	// 主动释放:defer 闭包看见 f=nil 跳过,避免后续 reconcileArchive 的 open
+	// 复用本 fd 后被误关。
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = f.Close()
+	f = nil
 
 	// 9. 压缩归档(锁外亦可,此处仍在锁内但不再触碰活跃文件)。
 	return true, reconcileArchive(opts.ArchiveDir)

@@ -150,3 +150,26 @@ func TestPrune_WritesLedgerAndKeepsChain(t *testing.T) {
 		t.Fatalf("want 1 (active only), got %d", n)
 	}
 }
+
+// TestReconcileArchive_CompressesOrphanJSONL:Rotate 崩溃留下的未压缩 .jsonl
+// (无 .gz 同伴)应被 reconcile 压成 .gz 并删除原件。
+func TestReconcileArchive_CompressesOrphanJSONL(t *testing.T) {
+	dir := t.TempDir()
+	ar := filepath.Join(dir, "archive")
+	if err := os.MkdirAll(ar, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(ar, "audit.jsonl.20260101T000000.000000Z.jsonl")
+	if err := os.WriteFile(plain, []byte(recordLine("2026-01-01T00:00:00+00:00", hashN(0), hashN(1))), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileArchive(ar); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(plain); !os.IsNotExist(err) {
+		t.Fatalf("未压缩原件应被删除, err=%v", err)
+	}
+	if _, err := os.Stat(plain + ".gz"); err != nil {
+		t.Fatalf(".gz 应存在: %v", err)
+	}
+}
