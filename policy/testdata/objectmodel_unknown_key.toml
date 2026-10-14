@@ -14,6 +14,11 @@ allowed_dirs = ["/tmp"]
 
 [audit]
 log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+max_size_mb = 256
+retain_days = 30
+
+[state]
+max_size_mb = 64
 
 [objectmodel]
 enabled_kinds = ["service"]

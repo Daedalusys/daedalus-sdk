@@ -83,6 +83,16 @@ type FS struct {
 
 type Audit struct {
 	LogPath string `toml:"log_path"`
+	// MaxSizeMB 是 audit.jsonl 轮转阈值(>=0;<=0 视为缺省,fail-closed)。
+	MaxSizeMB int64 `toml:"max_size_mb"`
+	// RetainDays 是归档保留天数;验收硬底线 >=30。
+	RetainDays int64 `toml:"retain_days"`
+}
+
+// State 对应 TOML [state] 表:state.jsonl 缓存轮转阈值。
+type State struct {
+	// MaxSizeMB 是 state.jsonl 轮转阈值(>0;<=0 视为缺省,fail-closed)。
+	MaxSizeMB int64 `toml:"max_size_mb"`
 }
 
 // ObjectModel 对应 TOML [objectmodel] 表:资源 kind 的正向启用白名单
@@ -183,6 +193,7 @@ type Policy struct {
 	Shell        Shell        `toml:"shell"`
 	FS           FS           `toml:"fs"`
 	Audit        Audit        `toml:"audit"`
+	State        State        `toml:"state"`
 	ObjectModel  ObjectModel  `toml:"objectmodel"`
 	Blueprints   Blueprints   `toml:"blueprints"`
 	Confirmation Confirmation `toml:"confirmation"`
@@ -308,6 +319,17 @@ func (p *Policy) validate() error {
 	if p.Audit.LogPath == "" {
 		missing = append(missing, "audit.log_path")
 	}
+	if p.Audit.MaxSizeMB <= 0 {
+		missing = append(missing, "audit.max_size_mb")
+	}
+	// retain_days 是范围违规:并入 missing 列表后统一报错(与其他缺失字段同一种 fail-closed);
+	// 文案带阈值,便于诊断。
+	if p.Audit.RetainDays < 30 {
+		missing = append(missing, "audit.retain_days (must be >= 30)")
+	}
+	if p.State.MaxSizeMB <= 0 {
+		missing = append(missing, "state.max_size_mb")
+	}
 
 	if len(missing) > 0 {
 		sort.Strings(missing)
@@ -371,7 +393,12 @@ func Default() *Policy {
 			AllowedDirs: []string{"/home", "/var/log", "/tmp"},
 		},
 		Audit: Audit{
-			LogPath: "/var/log/daedalus/audit.jsonl",
+			LogPath:    "/var/log/daedalus/audit.jsonl",
+			MaxSizeMB:  256,
+			RetainDays: 30,
+		},
+		State: State{
+			MaxSizeMB: 64,
 		},
 		ObjectModel: ObjectModel{
 			EnabledKinds: []string{"service", "package", "task", "container", "policy"},

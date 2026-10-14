@@ -13,6 +13,11 @@ allowed_dirs = ["/tmp"]
 
 [audit]
 log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+max_size_mb = 256
+retain_days = 30
+
+[state]
+max_size_mb = 64
 
 # objectmodel 段取值同样刻意偏离 Default()(启用 service / package / task /
 # container / policy 五类 kind),证明 [objectmodel].enabled_kinds 逐字段透传解析。

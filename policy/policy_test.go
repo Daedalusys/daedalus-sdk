@@ -818,3 +818,110 @@ func TestPolicy_LoadDisabledSentinel_NotFirstLine(t *testing.T) {
 		t.Errorf("非首行哨兵不应触发 ErrDisabled,got %v", err)
 	}
 }
+
+// === audit/state 轮转阈值(2026-10-14 audit-state-rotation) ===
+
+// TestPolicy_DefaultHasAuditStateThresholds 锁定 Default() 的轮转阈值:
+// audit.max_size_mb=256 / audit.retain_days=30 / state.max_size_mb=64。
+func TestPolicy_DefaultHasAuditStateThresholds(t *testing.T) {
+	d := policy.Default()
+	if d.Audit.MaxSizeMB != 256 {
+		t.Errorf("Default().Audit.MaxSizeMB = %d, want 256", d.Audit.MaxSizeMB)
+	}
+	if d.Audit.RetainDays != 30 {
+		t.Errorf("Default().Audit.RetainDays = %d, want 30", d.Audit.RetainDays)
+	}
+	if d.State.MaxSizeMB != 64 {
+		t.Errorf("Default().State.MaxSizeMB = %d, want 64", d.State.MaxSizeMB)
+	}
+}
+
+const thresholdBasePolicy = `[shell]
+allowed_commands = ["ls"]
+binary_dirs = ["/usr/bin"]
+allowed_path_prefixes = ["/home"]
+blocked_paths = ["/etc/shadow"]
+clean_env = { PATH = "/usr/bin" }
+timeout_ms = 30000
+[fs]
+allowed_dirs = ["/home"]
+[audit]
+log_path = "/tmp/audit.jsonl"
+max_size_mb = 256
+retain_days = 30
+[state]
+max_size_mb = 64
+[objectmodel]
+enabled_kinds = ["service"]
+[blueprints]
+output_dirs = ["/etc"]
+post_check_commands = ["systemctl"]
+reload_services = ["nginx"]
+secret_sources = ["kwallet"]
+`
+
+// TestPolicy_Validate_RetainDaysBelow30FailsClosed 钉住验收硬底线:
+// retain_days < 30 一律 fail-closed 拒启(错误须点名 retain_days 与 >= 30)。
+func TestPolicy_Validate_RetainDaysBelow30FailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "policy.toml")
+	body := strings.Replace(thresholdBasePolicy, "retain_days = 30", "retain_days = 10", 1)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := policy.Load(p)
+	if err == nil {
+		t.Fatal("retain_days=10 应 fail-closed, got nil")
+	}
+	if !strings.Contains(err.Error(), "retain_days") || !strings.Contains(err.Error(), ">= 30") {
+		t.Fatalf("错误须点名 retain_days 且含 >= 30, got: %v", err)
+	}
+}
+
+// TestPolicy_Validate_StateMaxSizeMissingFailsClosed 钉住 [state] 段缺失 fail-closed。
+func TestPolicy_Validate_StateMaxSizeMissingFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "policy.toml")
+	body := thresholdBasePolicy
+	if i := strings.Index(body, "[state]"); i >= 0 {
+		body = body[:i] + strings.Replace(body[i:], "max_size_mb = 64\n", "", 1)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := policy.Load(p)
+	if err == nil {
+		t.Fatal("[state] 段缺失应 fail-closed, got nil")
+	}
+	if !strings.Contains(err.Error(), "state.max_size_mb") {
+		t.Fatalf("错误须点名 state.max_size_mb, got: %v", err)
+	}
+}
+
+// TestPolicy_AuditStateThresholds_DriftWithRealToml 是 audit/state 阈值的
+// 镜像 policy.toml 三点漂移测试:仓库真实 policy.toml 必须与 Default() 一致。
+func TestPolicy_AuditStateThresholds_DriftWithRealToml(t *testing.T) {
+	t.Setenv(policy.EnvPolicyPath, "")
+	st, err := os.Stat(policy.ProductionPath)
+	if err == nil && !st.IsDir() {
+		t.Skipf("本机存在 %s,无法演练开发态回溯", policy.ProductionPath)
+	}
+	repoPolicy, err := policy.ResolvePath()
+	if err != nil {
+		t.Fatalf("开发态回溯未命中仓库 policy.toml: %v", err)
+	}
+	real, err := policy.Load(repoPolicy)
+	if err != nil {
+		t.Fatalf("镜像 policy.toml 未通过自身校验(含 audit/state 阈值): %v", err)
+	}
+	def := policy.Default()
+	if real.Audit.MaxSizeMB != def.Audit.MaxSizeMB {
+		t.Errorf("audit.max_size_mb 漂移: %d vs %d", real.Audit.MaxSizeMB, def.Audit.MaxSizeMB)
+	}
+	if real.Audit.RetainDays != def.Audit.RetainDays {
+		t.Errorf("audit.retain_days 漂移: %d vs %d", real.Audit.RetainDays, def.Audit.RetainDays)
+	}
+	if real.State.MaxSizeMB != def.State.MaxSizeMB {
+		t.Errorf("state.max_size_mb 漂移: %d vs %d", real.State.MaxSizeMB, def.State.MaxSizeMB)
+	}
+}
