@@ -299,3 +299,44 @@ func TestState_ConcurrentWrites(t *testing.T) {
 		seen[e.Name] = true
 	}
 }
+
+// === 轮转适配(2026-10-14 audit-state-rotation) ===
+
+func stEntry(i int) StateEntry {
+	return StateEntry{
+		Kind:       "k",
+		Name:       fmt.Sprintf("n%d", i),
+		ObservedAt: time.Now(),
+		Payload:    json.RawMessage(`{"x":"y"}`),
+	}
+}
+
+// TestStateLog_RotatesAndReadCrossesGenerations 确定性触发一次轮转(size>cap 后
+// rename 成 .1),再验证 Read 跨 .1 + 活跃连续,不出现"写过的读不到"空窗。
+func TestStateLog_RotatesAndReadCrossesGenerations(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.jsonl")
+	t.Setenv("DAEDALUS_STATE_PATH", path)
+	SetMaxSizeBytes(0) // 复位到默认大阈值(4 条不触发)
+	t.Cleanup(func() { SetMaxSizeBytes(0) })
+
+	for i := 0; i < 4; i++ {
+		if err := Log(stEntry(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	SetMaxSizeBytes(1) // 下一次写触发轮转
+	if err := Log(stEntry(4)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(prevGenPath(path)); err != nil {
+		t.Fatalf(".1 应存在: %v", err)
+	}
+	entries, err := Read(time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("want 5 跨代, got %d", len(entries))
+	}
+}

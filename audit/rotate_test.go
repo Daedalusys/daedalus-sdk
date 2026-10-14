@@ -12,9 +12,9 @@ import (
 // noopAttrs 取代 chattr;免 root 即可完成"轮转 + 复原"路径。
 type noopAttrs struct{}
 
-func (noopAttrs) HasAppend(string) (bool, error)        { return false, nil }
-func (noopAttrs) ClearAppend(string) error              { return nil }
-func (noopAttrs) SetAppend(string) error                { return nil }
+func (noopAttrs) HasAppend(string) (bool, error) { return false, nil }
+func (noopAttrs) ClearAppend(string) error       { return nil }
+func (noopAttrs) SetAppend(string) error         { return nil }
 
 func withFakeAttrs(t *testing.T) {
 	t.Helper()

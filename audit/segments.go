@@ -21,12 +21,12 @@ import (
 // segScan 是一个段的扫描结果。TxLast 是"末次出现的 entry_hash per txID" 映射,
 // 供 Prune 算 inherited_tx 用。
 type segScan struct {
-	FirstPrev      string
-	Last           string
-	LastNonTx      string
-	Entries        int
-	LastTimestamp  string
-	TxLast         map[string]string
+	FirstPrev     string
+	Last          string
+	LastNonTx     string
+	Entries       int
+	LastTimestamp string
+	TxLast        map[string]string
 }
 
 // bones 返回 ledger 用 PrunedSegment 视图。

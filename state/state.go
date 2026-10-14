@@ -17,11 +17,51 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/Daedalusys/daedalus-sdk/dirs"
 )
+
+// 阈值解析优先序:SetMaxSizeBytes(显式)> env DAEDALUS_STATE_MAX_SIZE_MB(MB)
+// > 默认 64 MiB。SetMaxSizeBytes(0) 复位到 env/默认(测试用)。
+const (
+	EnvMaxSizeMB        = "DAEDALUS_STATE_MAX_SIZE_MB"
+	defaultMaxSizeBytes = 64 * 1024 * 1024
+)
+
+var (
+	maxSizeBytes int64 = defaultMaxSizeBytes
+	maxSizeSet   bool
+)
+
+// SetMaxSizeBytes 显式设置轮转上限(字节);n<=0 复位到 env/默认。
+// 并发不安全,启动期或测试调用。
+func SetMaxSizeBytes(n int64) {
+	if n <= 0 {
+		maxSizeSet = false
+		return
+	}
+	maxSizeBytes = n
+	maxSizeSet = true
+}
+
+// MaxSizeBytes 返回当前生效阈值(字节)。
+func MaxSizeBytes() int64 {
+	if maxSizeSet {
+		return maxSizeBytes
+	}
+	if v := os.Getenv(EnvMaxSizeMB); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n * 1024 * 1024
+		}
+	}
+	return defaultMaxSizeBytes
+}
+
+// prevGenPath 返回活跃文件旁边的上一代路径(<active>.1)。
+func prevGenPath(active string) string { return active + ".1" }
 
 // StateEntry 是一条状态观测记录,对应 state.jsonl 的一行 JSON。
 // ObservedAt 由调用方填充(如 service.query 的观测时刻);
@@ -64,7 +104,7 @@ func Log(entry StateEntry) error {
 		}
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o640)
 	if err != nil {
 		return fmt.Errorf("state: 打开状态文件失败: %w", err)
 	}
@@ -84,12 +124,40 @@ func Log(entry StateEntry) error {
 	if err := f.Sync(); err != nil {
 		return fmt.Errorf("state: flush 失败: %w", err)
 	}
+	// 缓存轮转:超阈值后 rename 活跃到 .1 并重建空活跃。发生在同一把 EX 锁
+	// 窗口内;flock 持在旧 inode,rename 不影响;readers 拿 SH 锁(见 Read)被
+	// 本次 EX 阻塞,期间 .1 不会变动,快照一致。
+	if lim := MaxSizeBytes(); lim > 0 {
+		if fi, serr := f.Stat(); serr == nil && fi.Size() > lim {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+			_ = f.Close()
+			if rerr := rotateStateFile(path); rerr != nil {
+				return fmt.Errorf("state: 轮转失败: %w", rerr)
+			}
+		}
+	}
 	return nil
 }
 
-// Read 顺序解析全量观测,仅返回 ObservedAt >= since 的条目(since 为零值表示
-// "全要")。容错读取器(state 是缓存而非证据,姿态与审计验证器刻意相反):文件
-// 不存在 → (nil, nil);坏行静默跳过;仅真实 I/O 失败才返回 error。
+// rotateStateFile:rename active → active.1,新建空 active 0640。覆盖旧 .1。
+func rotateStateFile(path string) error {
+	if err := os.Rename(path, prevGenPath(path)); err != nil {
+		return err
+	}
+	nf, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o640)
+	if err != nil {
+		return err
+	}
+	return nf.Close()
+}
+
+// Read 顺序解析全量观测(跨"上一代 .1 + 活跃"),仅返回 ObservedAt >= since
+// 的条目。容错读取器(state 是缓存而非证据):文件不存在 → (nil, nil);坏行
+// 静默跳过;仅真实 I/O 失败才返回 error。
+//
+// 锁协议:先开活跃 + LOCK_SH(与 Log 的 LOCK_EX 互斥),期间轮转被阻塞,
+// 再依次读 .1(老)与活跃(新),构成同一次轮转前后的一致快照;避免"读了旧 .1
+// 又读了新空活跃"的"写过的读不到"空窗。
 func Read(since time.Time) ([]StateEntry, error) {
 	path, err := DefaultPath()
 	if err != nil {
@@ -97,20 +165,40 @@ func Read(since time.Time) ([]StateEntry, error) {
 	}
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
+		// 活跃缺失(新启动 / 刚轮转窗口):退化只读 .1。
+		if pf, perr := os.Open(prevGenPath(path)); perr == nil {
+			out := scanEntries(pf, since)
+			_ = pf.Close()
+			return out, nil
+		}
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("state: 打开状态文件失败: %w", err)
 	}
 	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+		return nil, fmt.Errorf("state: flock(LOCK_SH) 失败: %w", err)
+	}
+	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
 
 	var out []StateEntry
-	r := bufio.NewReader(f)
+	if pf, perr := os.Open(prevGenPath(path)); perr == nil {
+		out = append(out, scanEntries(pf, since)...)
+		_ = pf.Close()
+	}
+	out = append(out, scanEntries(f, since)...)
+	return out, nil
+}
+
+// scanEntries 顺序解析 r,按 ObservedAt 过滤(零值不过滤);坏行静默跳过。
+func scanEntries(r io.Reader, since time.Time) []StateEntry {
+	var out []StateEntry
+	br := bufio.NewReader(r)
 	for {
-		line, readErr := r.ReadBytes('\n')
+		line, readErr := br.ReadBytes('\n')
 		if len(line) > 0 {
 			var e StateEntry
-			// TrimSpace 容忍 \r\n 与尾随空白;解析失败即坏行,跳过。
 			if json.Unmarshal(bytes.TrimSpace(line), &e) == nil {
 				if since.IsZero() || !e.ObservedAt.Before(since) {
 					out = append(out, e)
@@ -118,13 +206,10 @@ func Read(since time.Time) ([]StateEntry, error) {
 			}
 		}
 		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				break // 末行可无换行,已在上面处理
-			}
-			return nil, fmt.Errorf("state: 读取状态文件失败: %w", readErr)
+			break
 		}
 	}
-	return out, nil
+	return out
 }
 
 // LatestByKind 返回指定类别每个资源名的最新一条观测。文件是 append-only,

@@ -60,7 +60,7 @@ func (xattrOps) ClearAppend(p string) error {
 	if err != nil {
 		return err
 	}
-	return unix.IoctlSetInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags &^ fsAppendFL)
+	return unix.IoctlSetInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags&^fsAppendFL)
 }
 
 func (xattrOps) SetAppend(p string) error {
