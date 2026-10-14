@@ -78,6 +78,11 @@ func listArchiveSegments(dir string) ([]string, error) {
 			continue
 		}
 		name := e.Name()
+		// 只收归档段名 `audit.jsonl.<ts>.jsonl[.gz]`;排除 pruned.jsonl 等
+		// 非段文件(其不含 `.jsonl.` 中缀)。
+		if !strings.Contains(name, ".jsonl.") {
+			continue
+		}
 		var base string
 		switch {
 		case strings.HasSuffix(name, ".jsonl.gz"):
