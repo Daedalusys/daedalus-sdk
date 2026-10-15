@@ -173,6 +173,14 @@ func LogAudit(e Entry) (*Record, error) {
 		}
 		if found {
 			e.TxPrevHash = rec.EntryHash
+		} else if fi, ferr := f.Stat(); ferr == nil && fi.Size() == 0 {
+			// 轮转后空活跃:上一段最后的非 tx 在归档里,靠 .tail 第二行播种;
+			// 缺失则降 Genesis(首次部署无 .tail 的正常路径)。
+			if seed := readLastNonTxSeed(e.LogPath); seed != "" {
+				e.TxPrevHash = seed
+			} else {
+				e.TxPrevHash = GenesisHash
+			}
 		} else {
 			e.TxPrevHash = GenesisHash
 		}

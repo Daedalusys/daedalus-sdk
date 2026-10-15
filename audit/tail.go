@@ -16,16 +16,40 @@ import (
 // TailPath 返回活跃文件对应的 .tail 路径:与 LogPath 同目录,后缀 + ".tail"。
 func TailPath(logPath string) string { return logPath + ".tail" }
 
-// readChainSeed 读 <logPath>.tail,返回合法的 64 字符小写十六进制哈希;
-// 文件不存在 / 内容为空 / 格式非法 → 返回 ""(调用方降级到 GenesisHash)。
+// readChainSeed 读 <logPath>.tail 的**第一行**,返回合法的 64 字符小写十六进制
+// 哈希;文件不存在 / 内容为空 / 格式非法 → 返回 ""(调用方降级到 GenesisHash)。
 //
 // 只在活跃文件 size==0 时调用,避免掩盖非空文件的尾部损坏。
 func readChainSeed(logPath string) string {
-	data, err := os.ReadFile(TailPath(logPath))
-	if err != nil {
+	lines := readTailLines(logPath)
+	if len(lines) < 1 {
 		return ""
 	}
-	s := strings.TrimSpace(string(data))
+	return validHash(lines[0])
+}
+
+// readLastNonTxSeed 读 <logPath>.tail 的**第二行**(上一段最后一条非 tx 记录
+// 的 entry_hash);单行旧格式/缺失/非法 → ""。供轮转后空活跃文件的 tx begin
+// 播种(tx_prev_hash 必须接上一段最后的非 tx,而非 Genesis)。
+func readLastNonTxSeed(logPath string) string {
+	lines := readTailLines(logPath)
+	if len(lines) < 2 {
+		return ""
+	}
+	return validHash(lines[1])
+}
+
+// readTailLines 读 .tail 并按行拆(去尾部空白);读取失败 → nil。
+func readTailLines(logPath string) []string {
+	data, err := os.ReadFile(TailPath(logPath))
+	if err != nil {
+		return nil
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+func validHash(s string) string {
+	s = strings.TrimSpace(s)
 	if len(s) != 64 {
 		return ""
 	}

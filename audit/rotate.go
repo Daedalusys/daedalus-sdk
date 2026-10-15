@@ -69,11 +69,19 @@ func Rotate(opts RotateOptions) (bool, error) {
 	}
 	// 二重释放防护:defer 闭包拍下变量指针;手动 close 后 f = nil,
 	// defer 跳过(否则会在 fd 被后续 open 复用时关错文件)。
-	defer func() { if f != nil { _ = f.Close() } }()
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+	}()
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return false, fmt.Errorf("audit: 轮转 flock 失败: %w", err)
 	}
-	defer func() { if f != nil { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) } }()
+	defer func() {
+		if f != nil {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		}
+	}()
 
 	seg, err := scanSegmentFileHandle(f)
 	if err != nil {
@@ -84,8 +92,8 @@ func Rotate(opts RotateOptions) (bool, error) {
 		return false, reconcileArchive(opts.ArchiveDir)
 	}
 
-	// 4. 先落尾(活跃文件变空之前)。
-	if err := writeFileAtomic(TailPath(opts.LogPath), []byte(seg.Last+"\n")); err != nil {
+	// 4. 先落尾(活跃文件变空之前)。两行:全局链尾 + 最后非 tx(供 tx begin 播种)。
+	if err := writeFileAtomic(TailPath(opts.LogPath), []byte(seg.Last+"\n"+seg.LastNonTx+"\n")); err != nil {
 		return false, fmt.Errorf("audit: 写 .tail 失败: %w", err)
 	}
 

@@ -82,7 +82,7 @@ func TestRotate_BasicFlow_ArchiveAndTailAndChain(t *testing.T) {
 	}
 	// .tail 存在并等于 prev
 	tail, _ := os.ReadFile(TailPath(p))
-	if strings.TrimSpace(string(tail)) != prev {
+	if strings.SplitN(strings.TrimSpace(string(tail)), "\n", 2)[0] != prev {
 		t.Fatalf("tail 内容错: %s", tail)
 	}
 	// 再写一条:链续

@@ -108,14 +108,23 @@ func Log(entry StateEntry) error {
 	if err != nil {
 		return fmt.Errorf("state: 打开状态文件失败: %w", err)
 	}
-	defer f.Close()
+	// 二重释放防护:defer 闭包拍下变量指针;手动 close 后 f = nil,
+	// defer 跳过(否则 f 指向的 fd 在 rotateStateFile 的 os.OpenFile 中被复用后,
+	// 被误关成新文件,造成静默丢写)。
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+	}()
 
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("state: flock(LOCK_EX) 失败: %w", err)
 	}
-	// defer 为 LIFO:本行注册晚于上面的 Close → 退出时先 LOCK_UN 再 Close,
-	// 与 audit.LogAudit 的"写完后解锁、随函数退出关闭文件"顺序一致。
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer func() {
+		if f != nil {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		}
+	}()
 
 	// O_APPEND 下写恒追加,内核保证偏移原子;单行一次 Write,无需防御性 Seek。
 	if _, err := f.Write(buf.Bytes()); err != nil {
@@ -129,8 +138,11 @@ func Log(entry StateEntry) error {
 	// 本次 EX 阻塞,期间 .1 不会变动,快照一致。
 	if lim := MaxSizeBytes(); lim > 0 {
 		if fi, serr := f.Stat(); serr == nil && fi.Size() > lim {
+			// 主动释放:defer 闭包看见 f=nil 跳过,避免后续 rotateStateFile 的
+			// os.OpenFile 复用本 fd 后被误关成新文件。
 			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 			_ = f.Close()
+			f = nil
 			if rerr := rotateStateFile(path); rerr != nil {
 				return fmt.Errorf("state: 轮转失败: %w", rerr)
 			}

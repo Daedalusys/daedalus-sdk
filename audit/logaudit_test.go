@@ -245,3 +245,37 @@ func TestLogAudit_RejectsSymlink(t *testing.T) {
 		t.Fatal("符号链接应被 O_NOFOLLOW 拒绝, got nil")
 	}
 }
+
+// TestLogAudit_TxBeginAfterRotation_SeedsFromArchiveLastNonTx:轮转后活跃为空时,
+// 新 tx begin 的 tx_prev_hash 应取归档最后一条非 tx 记录的哈希(而非 GenesisHash)。
+func TestLogAudit_TxBeginAfterRotation_SeedsFromArchiveLastNonTx(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "audit.jsonl")
+	ar := filepath.Join(dir, "archive")
+	// 写一条非 tx
+	if _, err := LogAudit(Entry{Tool: "shell", LogPath: p}); err != nil {
+		t.Fatal(err)
+	}
+	// 强制轮转(用 Rotate 真实路径,产物 .tail 含段末信息)
+	if _, err := Rotate(RotateOptions{LogPath: p, ArchiveDir: ar, Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	// 新活跃为空;再写一条 tx begin
+	rec, err := LogAudit(Entry{
+		Tool: "daedalus_tx_begin", LogPath: p, TxID: "abcdef01", TxStep: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.TxPrevHash == GenesisHash {
+		t.Fatalf("tx begin 在轮转后首条应从归档最后非 tx 种子,非 Genesis")
+	}
+	// 必须是归档最后一条记录的 entry_hash(=归档唯一的非 tx 记录)
+	if rec.TxPrevHash == "" {
+		t.Fatal("tx_prev_hash 不应为空")
+	}
+	// 整链应过
+	if _, err := VerifyChain(p, ar); err != nil {
+		t.Fatalf("跨归档+tx begin 后整链应过, got %v", err)
+	}
+}
