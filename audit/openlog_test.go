@@ -128,3 +128,32 @@ func TestOpenLog_NoArchiveDir(t *testing.T) {
 		t.Fatalf("got %v, want [%s]", got, hashN(3))
 	}
 }
+
+// TestOpenLog_ExcludesPrunedJSONLFromSegments:ledger 文件(同名 .jsonl / .jsonl.gz)
+// 路径含 .jsonl. 子串,不能误判为归档段。OpenLog 走 dir(logPath)/archive 目录,
+// 过滤需以活跃 base 名("audit.jsonl.")为前缀。
+func TestOpenLog_ExcludesPrunedJSONLFromSegments(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "audit.jsonl")
+	ar := filepath.Join(dir, "archive")
+	os.MkdirAll(ar, 0o750)
+	// 写一段真归档
+	writeArchiveGz(t, ar, "audit.jsonl.20260101T000000.000000Z.jsonl.gz",
+		recordLine("2026-01-01T00:00:00+00:00", hashN(0), hashN(1)))
+	// 投毒:ledger 文件 + 同名 .jsonl.gz(都含 .jsonl. 子串,旧过滤误判段)
+	for _, poison := range []string{"pruned.jsonl", "pruned.jsonl.gz"} {
+		os.WriteFile(filepath.Join(ar, poison), []byte("a\n"), 0o640)
+	}
+	// OpenLog 在 archive 不为空时允许活跃缺失;为了不触发 NoneActive 报,补一个空活跃。
+	os.WriteFile(logPath, nil, 0o640)
+	r, err := OpenLog(logPath, OldestFirst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	// 只能拿到真段那 1 条;poison 两条都不该被当段解析(也不该触发损坏报错)
+	got := collectOpenLog(t, r)
+	if len(got) != 1 || got[0] != hashN(1) {
+		t.Fatalf("pruned*.jsonl 被误判为段,got %v", got)
+	}
+}

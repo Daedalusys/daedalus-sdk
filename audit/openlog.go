@@ -44,7 +44,8 @@ const maxLogLineBytes = 4 * 1024 * 1024
 // OpenLog 返回 logPath 的记录迭代器,自动纳入 <dir(logPath)>/archive/ 下的归档段。
 // archive 目录不存在/为空时只迭代活跃文件。
 func OpenLog(logPath string, order LogOrder) (LogReader, error) {
-	segs, err := listArchiveSegments(filepath.Join(filepath.Dir(logPath), "archive"))
+	base := filepath.Base(logPath) // e.g. "audit.jsonl"
+	segs, err := listArchiveSegments(filepath.Join(filepath.Dir(logPath), "archive"), base)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +70,11 @@ func OpenLog(logPath string, order LogOrder) (LogReader, error) {
 }
 
 // listArchiveSegments 列出归档段,按 base 名升序;同段 .jsonl 与 .jsonl.gz 并存时
-// 取 .gz(压缩完成的版本)。目录不存在 → (nil, nil)。
-func listArchiveSegments(dir string) ([]string, error) {
+// 取 .gz(压缩完成的版本)。目录不存在 → (nil, nil)。只接受以 logBase+"." 开头
+// 的段文件(例 "audit.jsonl.2026...jsonl.gz"),排除任何 ledger / 状态 / 随机文件
+// —— 旧过滤用 "含 .jsonl. 中缀",会被 "pruned.jsonl.gz" 误判为段(因其亦含
+// .jsonl. 子串)。
+func listArchiveSegments(dir string, logBase string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -84,9 +88,9 @@ func listArchiveSegments(dir string) ([]string, error) {
 			continue
 		}
 		name := e.Name()
-		// 只收归档段名 `audit.jsonl.<ts>.jsonl[.gz]`;排除 pruned.jsonl 等
-		// 非段文件(其不含 `.jsonl.` 中缀)。
-		if !strings.Contains(name, ".jsonl.") {
+		// 只收以 logBase+"." 开头的段文件(例 "audit.jsonl.2026...jsonl.gz")。
+		// 旧过滤用 ".jsonl." 中缀,会被 "pruned.jsonl.gz"(亦含该子串)误判为段。
+		if !strings.HasPrefix(name, logBase+".") {
 			continue
 		}
 		var base string

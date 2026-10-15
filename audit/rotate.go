@@ -110,8 +110,9 @@ func Rotate(opts RotateOptions) (bool, error) {
 		return false, fmt.Errorf("audit: 探测 append-only 失败(中止轮转): %w", herr)
 	}
 
-	// 6. rename 到归档(未压缩,先用最终名)。
-	name := archiveSegmentName(seg.LastTimestamp, opts.Now)
+	// 6. rename 到归档(未压缩,先用最终名)。段名 = <活跃 base>.<UTC 时间戳>.jsonl,
+	// 与 listArchiveSegments 的 prefix 过滤、segmentTime 的解析约定一致。
+	name := filepath.Base(opts.LogPath) + "." + archiveSegmentName(seg.LastTimestamp, opts.Now)
 	dest := filepath.Join(opts.ArchiveDir, name+".jsonl")
 	dest = uniquePath(dest)
 	if err := os.Rename(opts.LogPath, dest); err != nil {
@@ -145,6 +146,7 @@ func Rotate(opts RotateOptions) (bool, error) {
 // PruneOptions 是 Prune 的输入。
 type PruneOptions struct {
 	ArchiveDir string
+	LogPath    string // 活跃审计日志路径;空 → 默认 base "audit.jsonl"
 	RetainDays int64
 	Now        time.Time
 }
@@ -159,7 +161,11 @@ func Prune(opts PruneOptions) (int, error) {
 	if opts.RetainDays <= 0 {
 		return 0, nil
 	}
-	segs, err := listArchiveSegments(opts.ArchiveDir)
+	logBase := "audit.jsonl"
+	if opts.LogPath != "" {
+		logBase = filepath.Base(opts.LogPath)
+	}
+	segs, err := listArchiveSegments(opts.ArchiveDir, logBase)
 	if err != nil {
 		return 0, err
 	}

@@ -114,7 +114,7 @@ func VerifyChain(activePath, archiveDir string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	segs, err := listArchiveSegments(archiveDir)
+	segs, err := listArchiveSegments(archiveDir, filepath.Base(activePath))
 	if err != nil {
 		return 0, err
 	}
