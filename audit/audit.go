@@ -142,18 +142,22 @@ func LogAudit(e Entry) (*Record, error) {
 		}
 	}
 
-	f, err := os.OpenFile(e.LogPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	f, err := openLocked(e.LogPath)
 	if err != nil {
-		return nil, fmt.Errorf("audit: 打开日志文件失败: %w", err)
+		return nil, err
 	}
 	defer f.Close()
-
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return nil, fmt.Errorf("audit: flock(LOCK_EX) 失败: %w", err)
-	}
 	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
 
-	prevHash := lastEntryHash(f)
+	// 段间播种:活跃文件为空(轮转刚发生)时,prev 取 <logPath>.tail 的上一段尾哈希;
+	// 缺失/非法 → 空串,下面回退 lastEntryHash(空文件 → GenesisHash)。
+	var prevHash string
+	if fi, ferr := f.Stat(); ferr == nil && fi.Size() == 0 {
+		prevHash = readChainSeed(e.LogPath)
+	}
+	if prevHash == "" {
+		prevHash = lastEntryHash(f)
+	}
 
 	// 事务创世播种: 条目带 TxID 却未显式携带 tx_prev_hash 时, 在**同一把
 	// LOCK_EX 之下**复用 lastNonTxRecord 从刚回溯过的日志尾部取最近一条非 tx 记录的
@@ -169,6 +173,14 @@ func LogAudit(e Entry) (*Record, error) {
 		}
 		if found {
 			e.TxPrevHash = rec.EntryHash
+		} else if fi, ferr := f.Stat(); ferr == nil && fi.Size() == 0 {
+			// 轮转后空活跃:上一段最后的非 tx 在归档里,靠 .tail 第二行播种;
+			// 缺失则降 Genesis(首次部署无 .tail 的正常路径)。
+			if seed := readLastNonTxSeed(e.LogPath); seed != "" {
+				e.TxPrevHash = seed
+			} else {
+				e.TxPrevHash = GenesisHash
+			}
 		} else {
 			e.TxPrevHash = GenesisHash
 		}
@@ -214,6 +226,34 @@ func LogAudit(e Entry) (*Record, error) {
 		return nil, fmt.Errorf("audit: flush 失败: %w", err)
 	}
 	return rec, nil
+}
+
+// openLocked 打开活跃文件并持 LOCK_EX,同时做 inode 复验以对抗轮转竞态:
+//
+// 写者协议是“open → flock(文件自身)”。轮转若在写者 open 之后 rename 了活跃
+// 文件,写者拿到的是旧 inode,写进去会落到归档段。openLocked 在 flock 成功后
+// 用 fstat 与 stat(path) 比 inode:不等(或路径短暂缺失)就解锁、关闭、重开,
+// 有界重试。O_NOFOLLOW 拒绝符号链接换址,建文件恒 0640。
+func openLocked(path string) (*os.File, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND|syscall.O_NOFOLLOW, 0o640)
+		if err != nil {
+			return nil, fmt.Errorf("audit: 打开日志文件失败: %w", err)
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("audit: flock(LOCK_EX) 失败: %w", err)
+		}
+		fi, ferr := f.Stat()
+		pi, perr := os.Stat(path)
+		if ferr == nil && perr == nil && os.SameFile(fi, pi) {
+			return f, nil
+		}
+		// 不匹配:文件在 open 与 flock 之间被轮转走。解锁、关闭、重试。
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}
+	return nil, fmt.Errorf("audit: 日志文件 %s inode 复验重试耗尽(持续被轮转)", path)
 }
 
 // FormatTimestamp 复刻 datetime.datetime.now(datetime.timezone.utc).isoformat()。

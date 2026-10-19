@@ -13,6 +13,11 @@ allowed_dirs = ["/tmp"]
 
 [audit]
 log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+max_size_mb = 256
+retain_days = 30
+
+[state]
+max_size_mb = 64
 
 # [blueprints] 段保留(该夹具只缺 [objectmodel],其余结构完整)。
 [blueprints]

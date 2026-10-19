@@ -152,7 +152,7 @@ func TestLoad_Happy(t *testing.T) {
 	if p.Audit.LogPath != "/tmp/daedalus-policy-test-audit.jsonl" {
 		t.Errorf("audit.log_path = %q", p.Audit.LogPath)
 	}
-	if !slices.Equal(p.ObjectModel.EnabledKinds, []string{"service", "package"}) {
+	if !slices.Equal(p.ObjectModel.EnabledKinds, []string{"service", "package", "task", "container", "policy"}) {
 		t.Errorf("objectmodel.enabled_kinds = %v", p.ObjectModel.EnabledKinds)
 	}
 	if !slices.Equal(p.Blueprints.OutputDirs, []string{"/tmp"}) {
@@ -215,7 +215,7 @@ func TestPolicy_ObjectModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load 含 [objectmodel] 的合法策略失败: %v", err)
 	}
-	if !slices.Equal(p.ObjectModel.EnabledKinds, []string{"service", "package"}) {
+	if !slices.Equal(p.ObjectModel.EnabledKinds, []string{"service", "package", "task", "container", "policy"}) {
 		t.Errorf("夹具 enabled_kinds 未逐字段透传: %v", p.ObjectModel.EnabledKinds)
 	}
 
@@ -775,5 +775,153 @@ func TestPolicy_Ownership_DriftWithRealToml(t *testing.T) {
 	}
 	if real.Ownership.ByKind["service"] != def.Ownership.ByKind["service"] {
 		t.Errorf("ownership.by_kind[service] 漂移: %q vs %q", real.Ownership.ByKind["service"], def.Ownership.ByKind["service"])
+	}
+}
+
+// TestPolicy_LoadDisabledSentinel:disabled 哨兵(首行 "# daedalus:disabled\n")
+// 应被 Load 检测为 ErrDisabled,与"缺失"(ErrNotFound)/"损坏"严格区分。
+// 调用方 fail-closed 拒启,且不经过 DAEDALUS_POLICY_MODE=development 的回退。
+func TestPolicy_LoadDisabledSentinel(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "policy.toml")
+	body := "# daedalus:disabled\n# 此后的内容在 fail-closed 路径上不会被解析\nenabled_kinds = [\"service\"]\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := policy.Load(p)
+	if err == nil {
+		t.Fatal("disabled 哨兵应 fail-closed,got nil")
+	}
+	if !errors.Is(err, policy.ErrDisabled) {
+		t.Errorf("err 应为 ErrDisabled,got %v", err)
+	}
+	// 重要:不与 ErrNotFound 混(否则 dev opt-in 路径会回退 Default(),破坏 kill switch 语义)
+	if errors.Is(err, policy.ErrNotFound) {
+		t.Errorf("ErrDisabled 不应被识别为 ErrNotFound,got %v", err)
+	}
+}
+
+// TestPolicy_LoadDisabledSentinel_NotFirstLine:哨兵若在非首行(前面有注释/空行)
+// 不应触发 ErrDisabled——只有首行严格匹配才生效。
+// 防止"包装过的哨兵"绕过 kill switch 检测。
+func TestPolicy_LoadDisabledSentinel_NotFirstLine(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "policy.toml")
+	body := "# 顶层注释\n# daedalus:disabled\nenabled_kinds = []\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := policy.Load(p)
+	// 期望:不识别为 disabled(走 TOML 解析);enabled_kinds=[] 会触发 fail-closed 但
+	// err 不是 ErrDisabled。
+	if errors.Is(err, policy.ErrDisabled) {
+		t.Errorf("非首行哨兵不应触发 ErrDisabled,got %v", err)
+	}
+}
+
+// === audit/state 轮转阈值(2026-10-14 audit-state-rotation) ===
+
+// TestPolicy_DefaultHasAuditStateThresholds 锁定 Default() 的轮转阈值:
+// audit.max_size_mb=256 / audit.retain_days=30 / state.max_size_mb=64。
+func TestPolicy_DefaultHasAuditStateThresholds(t *testing.T) {
+	d := policy.Default()
+	if d.Audit.MaxSizeMB != 256 {
+		t.Errorf("Default().Audit.MaxSizeMB = %d, want 256", d.Audit.MaxSizeMB)
+	}
+	if d.Audit.RetainDays != 30 {
+		t.Errorf("Default().Audit.RetainDays = %d, want 30", d.Audit.RetainDays)
+	}
+	if d.State.MaxSizeMB != 64 {
+		t.Errorf("Default().State.MaxSizeMB = %d, want 64", d.State.MaxSizeMB)
+	}
+}
+
+const thresholdBasePolicy = `[shell]
+allowed_commands = ["ls"]
+binary_dirs = ["/usr/bin"]
+allowed_path_prefixes = ["/home"]
+blocked_paths = ["/etc/shadow"]
+clean_env = { PATH = "/usr/bin" }
+timeout_ms = 30000
+[fs]
+allowed_dirs = ["/home"]
+[audit]
+log_path = "/tmp/audit.jsonl"
+max_size_mb = 256
+retain_days = 30
+[state]
+max_size_mb = 64
+[objectmodel]
+enabled_kinds = ["service"]
+[blueprints]
+output_dirs = ["/etc"]
+post_check_commands = ["systemctl"]
+reload_services = ["nginx"]
+secret_sources = ["kwallet"]
+`
+
+// TestPolicy_Validate_RetainDaysBelow30FailsClosed 钉住验收硬底线:
+// retain_days < 30 一律 fail-closed 拒启(错误须点名 retain_days 与 >= 30)。
+func TestPolicy_Validate_RetainDaysBelow30FailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "policy.toml")
+	body := strings.Replace(thresholdBasePolicy, "retain_days = 30", "retain_days = 10", 1)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := policy.Load(p)
+	if err == nil {
+		t.Fatal("retain_days=10 应 fail-closed, got nil")
+	}
+	if !strings.Contains(err.Error(), "retain_days") || !strings.Contains(err.Error(), ">= 30") {
+		t.Fatalf("错误须点名 retain_days 且含 >= 30, got: %v", err)
+	}
+}
+
+// TestPolicy_Validate_StateMaxSizeMissingFailsClosed 钉住 [state] 段缺失 fail-closed。
+func TestPolicy_Validate_StateMaxSizeMissingFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "policy.toml")
+	body := thresholdBasePolicy
+	if i := strings.Index(body, "[state]"); i >= 0 {
+		body = body[:i] + strings.Replace(body[i:], "max_size_mb = 64\n", "", 1)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := policy.Load(p)
+	if err == nil {
+		t.Fatal("[state] 段缺失应 fail-closed, got nil")
+	}
+	if !strings.Contains(err.Error(), "state.max_size_mb") {
+		t.Fatalf("错误须点名 state.max_size_mb, got: %v", err)
+	}
+}
+
+// TestPolicy_AuditStateThresholds_DriftWithRealToml 是 audit/state 阈值的
+// 镜像 policy.toml 三点漂移测试:仓库真实 policy.toml 必须与 Default() 一致。
+func TestPolicy_AuditStateThresholds_DriftWithRealToml(t *testing.T) {
+	t.Setenv(policy.EnvPolicyPath, "")
+	st, err := os.Stat(policy.ProductionPath)
+	if err == nil && !st.IsDir() {
+		t.Skipf("本机存在 %s,无法演练开发态回溯", policy.ProductionPath)
+	}
+	repoPolicy, err := policy.ResolvePath()
+	if err != nil {
+		t.Fatalf("开发态回溯未命中仓库 policy.toml: %v", err)
+	}
+	real, err := policy.Load(repoPolicy)
+	if err != nil {
+		t.Fatalf("镜像 policy.toml 未通过自身校验(含 audit/state 阈值): %v", err)
+	}
+	def := policy.Default()
+	if real.Audit.MaxSizeMB != def.Audit.MaxSizeMB {
+		t.Errorf("audit.max_size_mb 漂移: %d vs %d", real.Audit.MaxSizeMB, def.Audit.MaxSizeMB)
+	}
+	if real.Audit.RetainDays != def.Audit.RetainDays {
+		t.Errorf("audit.retain_days 漂移: %d vs %d", real.Audit.RetainDays, def.Audit.RetainDays)
+	}
+	if real.State.MaxSizeMB != def.State.MaxSizeMB {
+		t.Errorf("state.max_size_mb 漂移: %d vs %d", real.State.MaxSizeMB, def.State.MaxSizeMB)
 	}
 }

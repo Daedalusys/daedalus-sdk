@@ -16,6 +16,7 @@
 package policy
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -52,6 +53,21 @@ var DevRelPaths = []string{
 // 与"文件存在但损坏/字段缺失"(真解析错误)严格区分,后者必须拒绝启动。
 var ErrNotFound = errors.New("policy: 未找到 policy.toml(生产路径与仓库回溯均未命中)")
 
+// policyDisabledSentinel 是 daedalus-tx policy.set absent Apply 写入的首行标记。
+// policy.Load 检测到它即返回 ErrDisabled(不是 ErrNotFound,不是解析错)。
+// 严格首行匹配:哨兵前面的任何注释/空行都不算 disabled(防"包装过的哨兵"绕过)。
+const policyDisabledSentinel = "# daedalus:disabled\n"
+
+// DisabledSentinel 是 policyDisabledSentinel 的导出形态:daedalus-core 的
+// policy.set 适配器必须写入**逐字节一致**的哨兵,故经本常量跨仓共享,避免两边
+// 手写字面量漂移。SDK 仍是哨兵字节的唯一事实源。
+const DisabledSentinel = policyDisabledSentinel
+
+// ErrDisabled 表示策略文件被 daedalus-tx 显式停用(kill switch),与"缺失"、
+// "损坏"严格区分:调用方 fail-closed 拒启,且**不**走 DAEDALUS_POLICY_MODE=development
+// 的 Default() 回退(那是 ErrNotFound 的语义)。
+var ErrDisabled = errors.New("policy: 策略被 daedalus-tx 显式停用 (kill switch)")
+
 type Shell struct {
 	AllowedCommands     []string          `toml:"allowed_commands"`
 	BinaryDirs          []string          `toml:"binary_dirs"`
@@ -67,6 +83,16 @@ type FS struct {
 
 type Audit struct {
 	LogPath string `toml:"log_path"`
+	// MaxSizeMB 是 audit.jsonl 轮转阈值(>=0;<=0 视为缺省,fail-closed)。
+	MaxSizeMB int64 `toml:"max_size_mb"`
+	// RetainDays 是归档保留天数;验收硬底线 >=30。
+	RetainDays int64 `toml:"retain_days"`
+}
+
+// State 对应 TOML [state] 表:state.jsonl 缓存轮转阈值。
+type State struct {
+	// MaxSizeMB 是 state.jsonl 轮转阈值(>0;<=0 视为缺省,fail-closed)。
+	MaxSizeMB int64 `toml:"max_size_mb"`
 }
 
 // ObjectModel 对应 TOML [objectmodel] 表:资源 kind 的正向启用白名单
@@ -167,6 +193,7 @@ type Policy struct {
 	Shell        Shell        `toml:"shell"`
 	FS           FS           `toml:"fs"`
 	Audit        Audit        `toml:"audit"`
+	State        State        `toml:"state"`
 	ObjectModel  ObjectModel  `toml:"objectmodel"`
 	Blueprints   Blueprints   `toml:"blueprints"`
 	Confirmation Confirmation `toml:"confirmation"`
@@ -216,6 +243,12 @@ func Load(path string) (*Policy, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("policy: 读取 %s 失败: %w", path, err)
+	}
+	// 首行严格匹配 disabled 哨兵(在解析之前短路):表示本文件由 policy.set absent
+	// 主动停用。与"缺失"(ErrNotFound)严格区分——后者可经 dev opt-in 回退 Default(),
+	// disabled 是显式 kill switch,永远 fail-closed。
+	if bytes.HasPrefix(data, []byte(policyDisabledSentinel)) {
+		return nil, ErrDisabled
 	}
 	var p Policy
 	meta, err := toml.Decode(string(data), &p)
@@ -286,6 +319,17 @@ func (p *Policy) validate() error {
 	if p.Audit.LogPath == "" {
 		missing = append(missing, "audit.log_path")
 	}
+	if p.Audit.MaxSizeMB <= 0 {
+		missing = append(missing, "audit.max_size_mb")
+	}
+	// retain_days 是范围违规:并入 missing 列表后统一报错(与其他缺失字段同一种 fail-closed);
+	// 文案带阈值,便于诊断。
+	if p.Audit.RetainDays < 30 {
+		missing = append(missing, "audit.retain_days (must be >= 30)")
+	}
+	if p.State.MaxSizeMB <= 0 {
+		missing = append(missing, "state.max_size_mb")
+	}
 
 	if len(missing) > 0 {
 		sort.Strings(missing)
@@ -349,10 +393,15 @@ func Default() *Policy {
 			AllowedDirs: []string{"/home", "/var/log", "/tmp"},
 		},
 		Audit: Audit{
-			LogPath: "/var/log/daedalus/audit.jsonl",
+			LogPath:    "/var/log/daedalus/audit.jsonl",
+			MaxSizeMB:  256,
+			RetainDays: 30,
+		},
+		State: State{
+			MaxSizeMB: 64,
 		},
 		ObjectModel: ObjectModel{
-			EnabledKinds: []string{"service", "package"},
+			EnabledKinds: []string{"service", "package", "task", "container", "policy"},
 		},
 		Blueprints: Blueprints{
 			OutputDirs:        []string{"/etc/nginx/conf.d", "/etc/haproxy", "/etc/postgresql", "/etc/redis"},
