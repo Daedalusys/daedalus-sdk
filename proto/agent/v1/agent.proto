@@ -1,0 +1,211 @@
+// Fleet control plane <-> daedalus-agent wire protocol (P0.5).
+//
+// Spec: docs/superpowers/specs/2026-10-17-fleet-control-plane-design.md v3.1
+//   (§4.4 wire protocol, §7.3 C3 cert grace 1h, §6 B5 best-effort rollback)
+//
+// Five RPCs:
+//
+//   Register          — agent上线,响应带 snapshot_capability 字段
+//   Heartbeat         — 保活 + pending intents 通知
+//   ApplyIntent       — 包/文件意图落地
+//   SnapshotRequest   — 控制面要求 agent 立刻 snapshot
+//   ReportStatus      — 审计事件回报(本地 JSONL 哈希链 → 控制面)
+//
+// Transport: gRPC over mTLS, control plane 主动 outbound, agent inbound
+// listen 单端口(spec §4.4). cert 短 TTL 默认 24h, grace 1h(§7.3 C3).
+//
+// snapshot_capability 枚举 5 个值(spec §4.4)写全;P0.5 阶段
+// Register handler 只填 btrfs-subvolume / rsync-target / none 三个
+// (lvm-snap / snapper 在 issue #10 跟踪的 patch release 落地)。
+// 收到 unknown backend 的 Register 不能错报 lvm-snap / snapper。
+//
+// 入场券属性(spec G7/N8): daedalus-agent 迁到 daedalus-atomic 即退场;
+// 本 proto 协议不与 daedalus-atomic 节点走同一通道。
+
+syntax = "proto3";
+
+package daedalus.agent.v1;
+
+option go_package = "github.com/Daedalusys/daedalus-sdk/proto/agent/v1;agentv1";
+
+// Snapshot 能力探测(spec §4.4 + Q11 问卷缓解)。
+//
+// 探测不到的 backend 不能填对应值;Register handler 必须如实回报,
+// 控制面在人审 Plan 时显示「这台机能 / 不能 snapshot」,让用户在
+// ApplyIntent 前知情。"best-effort rollback" 不能在文案上被读成"一定能"。
+enum SnapshotCapability {
+  // proto3 default;不应该被发出;收到时按 UNSPECIFIED 视为 none 处理。
+  SNAPSHOT_CAPABILITY_UNSPECIFIED = 0;
+  // btrfs subvolume snapshot(优先)
+  SNAPSHOT_CAPABILITY_BTRFS_SUBVOLUME = 1;
+  // LVM snapshot(占位;P0.5 不实现,issue #10 跟踪)
+  SNAPSHOT_CAPABILITY_LVM_SNAP = 2;
+  // snapper(占位;P0.5 不实现,issue #10 跟踪)
+  SNAPSHOT_CAPABILITY_SNAPSHOT_SNAPPER = 3;
+  // rsync-based(降级;能 snapshot 但不是 subvolume 语义)
+  SNAPSHOT_CAPABILITY_RSYNC_TARGET = 4;
+  // 探测不到任何 snapshot 机制
+  SNAPSHOT_CAPABILITY_NONE = 5;
+}
+
+// 操作风险等级(spec §4.3 G9 + §6 B6)。low 允许自动重试 transient 失败;
+// high 任何失败立即暂停。policy.toml 声明默认值,人审 Plan 时可显式 override。
+enum RiskClass {
+  RISK_CLASS_UNSPECIFIED = 0;
+  RISK_CLASS_LOW = 1;
+  RISK_CLASS_HIGH = 2;
+}
+
+// ApplyIntent 返回结果。refused_* 路径必须带错误详情,
+// 控制面按失败分桶(spec §4.3 + G4)处理。
+enum ApplyIntentResult {
+  APPLY_INTENT_RESULT_UNSPECIFIED = 0;
+  APPLY_INTENT_RESULT_SUCCESS = 1;
+  // 探测到 snapshot_capability == none 时拒绝(spec G3 字面 + RF3)
+  APPLY_INTENT_RESULT_REFUSED_SNAPSHOT_CAPABILITY_NONE = 2;
+  // policy.toml 拒收(agent 端 fail-closed,spec §3)
+  APPLY_INTENT_RESULT_REFUSED_POLICY = 3;
+  // 宿主包管理器 / fs op 报瞬时失败(可重试)
+  APPLY_INTENT_RESULT_TRANSIENT_FAILURE = 4;
+  // 宿主包管理器 / fs op 报持久失败(不可重试,需人工)
+  APPLY_INTENT_RESULT_PERSISTENT_FAILURE = 5;
+}
+
+// Register / Heartbeat 通用:OS 自报(让控制面知道被控环境)。
+message OsInfo {
+  // distro 名(Ubuntu / RHEL / Debian / ...)
+  string distro = 1;
+  // distro 版本(22.04 / 9 / 12 / ...)
+  string version = 2;
+  // kernel 版本
+  string kernel = 3;
+  // arch(amd64 / arm64 / ...)
+  string arch = 4;
+  // hostname
+  string hostname = 5;
+}
+
+// ============== Register ==============
+
+message RegisterRequest {
+  // agent 自报 ID(安装时生成,持久化在 /var/lib/daedalus-agent/state/agent_id)
+  string agent_id = 1;
+  // daedalus-agent 二进制版本(语义化版本)
+  string agent_version = 2;
+  // OS 自报
+  OsInfo os_info = 3;
+  // 当前 cert fingerprint(SHA-256 hex);控制面用于比对其已知 cert 状态
+  string cert_fingerprint = 4;
+  // 本地审计链最新 seq;控制面用于续传
+  uint64 last_audit_seq = 5;
+}
+
+message RegisterResponse {
+  // 控制面分配的节点 ID(注册后稳定;agent_id 仍是自报,但 node_id 是权威)
+  string node_id = 1;
+  // 探测到的 snapshot 能力(关键字段,spec §4.4 + Q11 缓解)
+  SnapshotCapability snapshot_capability = 2;
+  // 当前 cert 的有效截止时间(Unix seconds);agent 用此判断 cert 即将过期
+  int64 cert_valid_until_unix = 3;
+  // 控制面期望的 policy.toml hash;agent 比对,不一致则重新拉
+  string policy_hash = 4;
+  // 心跳间隔(秒)
+  uint32 heartbeat_interval_seconds = 5;
+}
+
+// ============== Heartbeat ==============
+
+message HeartbeatRequest {
+  string node_id = 1;
+  // agent 当前状态摘要
+  string status_summary = 2;  // free-form,用于控制面展示
+  // 最近一次本地审计 seq
+  uint64 last_audit_seq = 3;
+}
+
+message HeartbeatResponse {
+  bool ack = 1;
+  // 距离下一次 heartbeat 多久
+  uint32 next_heartbeat_seconds = 2;
+  // 排队中的 intents 数量(0 表示无积压)
+  uint32 pending_intents = 3;
+}
+
+// ============== ApplyIntent ==============
+
+message ApplyIntentRequest {
+  // 控制面分配;agent 写入本地审计 + 回报
+  string intent_id = 1;
+  // intent kind: package.set / file.set / service.set / ...
+  string kind = 2;
+  // 目标路径或包名(/etc/nginx/nginx.conf / nginx ...)
+  string target = 3;
+  // intent spec(JSON 序列化,由 kind 决定 schema;本 proto 不锁 schema 形态)
+  string spec_json = 4;
+  // 风险等级;agent 端 policy.toml 也可声明默认值,本字段为人审 override
+  RiskClass risk_class = 5;
+}
+
+message ApplyIntentResponse {
+  ApplyIntentResult result = 1;
+  // 成功路径:本地事务 ID
+  string tx_id = 2;
+  // 写入本地审计的 seq(无论 result 是什么,失败也记)
+  uint64 audit_seq = 3;
+  // 失败时的人类可读说明(降级文案, RF3 钉)
+  string error_message = 4;
+}
+
+// ============== SnapshotRequest ==============
+
+message SnapshotRequestRequest {
+  string reason = 1;  // 自由文本;用于审计
+}
+
+message SnapshotResponse {
+  // 本次 snapshot ID;回滚时引用
+  string snapshot_id = 1;
+  // 实际使用的 backend(btrfs-subvolume / rsync-target / none)
+  SnapshotCapability backend_used = 2;
+  int64 created_at_unix = 3;
+}
+
+// ============== ReportStatus ==============
+
+message AuditEvent {
+  uint64 seq = 1;
+  int64 timestamp_unix = 2;
+  string event_type = 3;  // apply_intent.success / rollback.start / ...
+  string payload_json = 4;
+  // 哈希链 prev hash + 当前 hash(spec §3 单 ingress 哈希链)
+  string prev_hash = 5;
+  string current_hash = 6;
+}
+
+message ReportStatusRequest {
+  // 从哪个 seq 开始回报(0 = 全部)
+  uint64 since_audit_seq = 1;
+  // 一次最多回报多少条(控制面节流)
+  uint32 max_events = 2;
+}
+
+message ReportStatusResponse {
+  repeated AuditEvent events = 1;
+  // 此次回报后的最新 seq
+  uint64 final_seq = 2;
+}
+
+// ============== Service ==============
+
+service AgentService {
+  // 上线 + 续 cert + 续 policy;agent 启动时 + 续签后调用
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // 周期性保活(默认 30s, 控制面通过 Register 响应可调)
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // 包/文件意图落地;agent 跑本地事务 + 落审计 + 一次性回报
+  rpc ApplyIntent(ApplyIntentRequest) returns (ApplyIntentResponse);
+  // 控制面要求立刻 snapshot(如 plan apply 前 / 风险等级高的意图前)
+  rpc SnapshotRequest(SnapshotRequestRequest) returns (SnapshotResponse);
+  // 审计事件回报;agent 完成本地事务后批量推
+  rpc ReportStatus(ReportStatusRequest) returns (ReportStatusResponse);
+}

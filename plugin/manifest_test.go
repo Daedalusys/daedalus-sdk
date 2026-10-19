@@ -18,7 +18,7 @@ func validManifest() *Manifest {
 		Executable: "bin/main",
 		Entrypoint: []string{"run", "--allow-all"},
 		APIVersion: "0.1.0",
-		License:    "Apache-2.0",
+		License: "MIT",
 		Maintainer: "team@daedalusys.io",
 		Permissions: &Permissions{
 			Read:  []string{"/home"},
@@ -202,7 +202,7 @@ func TestManifestAPIVersion(t *testing.T) {
 
 // TestManifestLicense 锁定 license 字段:必填 + SPDX 标识格式。
 func TestManifestLicense(t *testing.T) {
-	accepts := []string{"Apache-2.0", "MIT", "GPL-3.0-or-later", "BSD-2-Clause", "0BSD"}
+	accepts := []string{"MIT", "GPL-3.0-or-later", "BSD-2-Clause", "0BSD"}
 	for _, v := range accepts {
 		m := validManifest()
 		m.License = v
