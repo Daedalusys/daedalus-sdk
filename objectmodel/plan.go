@@ -190,9 +190,23 @@ func (p *Plan) Validate() error {
 	if !validBatchingStrategy(p.Batching.Strategy) {
 		problems = append(problems, fmt.Sprintf(`字段 "batching.strategy" 非法:%q 不在批处理策略词表内(count|importance|custom)`, p.Batching.Strategy))
 	}
+	// strategy=count 时批量由 Size 决定:零/负值会让调度器无桶可切,
+	// 其余策略的批量归调度器自决,不校验 Size。
+	if p.Batching.Strategy == BatchingCount && p.Batching.Size <= 0 {
+		problems = append(problems, `字段 "batching.size" 在 strategy=count 下必须为正`)
+	}
 
 	if p.BlastRadius.MaxDowntime < 0 {
 		problems = append(problems, fmt.Sprintf(`字段 "blast_radius.max_downtime_ns" 非法:%d 不得为负`, p.BlastRadius.MaxDowntime))
+	}
+	// max_risk 是派生值(spec §4.3 的等式 Plan.max_risk = max(intents.risk_class)):
+	// 允许声明低于实际的风险,等于让调度器按 low 自动重试高危 Plan。
+	if want := p.MaxRisk(); p.BlastRadius.MaxRisk != want {
+		problems = append(problems, fmt.Sprintf(`字段 "blast_radius.max_risk" 与 intents 实际最大风险不一致(got %q, want %q)`, p.BlastRadius.MaxRisk, want))
+	}
+	// count 是爆炸半径的声明值,必须等于实际执行机器集,二者脱钩会漏报影响面。
+	if want := len(p.Machines); p.BlastRadius.Count != want {
+		problems = append(problems, fmt.Sprintf(`字段 "blast_radius.count" 与 machines 数量不一致(got %d, want %d)`, p.BlastRadius.Count, want))
 	}
 
 	if len(problems) > 0 {

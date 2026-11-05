@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestPlan_IsNotAResourceKind 钉住架构裁决:Plan 是下发动作,不是被管理资源。
@@ -37,4 +38,108 @@ func TestPlan_Validate_Rejects_IntentSpecNotJSON(t *testing.T) {
 	if !strings.Contains(err.Error(), "intents[0].spec") {
 		t.Errorf("报错未点名 intents[].spec, got: %s", err)
 	}
+}
+
+// TestPlan_MaxRisk_DerivedFromIntents 钉住 MaxRisk 的聚合语义:
+// Plan.max_risk 是 intents 实际风险的派生值,不是可独立填写的声明。
+func TestPlan_MaxRisk_DerivedFromIntents(t *testing.T) {
+	p := Plan{Intents: []Intent{
+		{Kind: KindService, Target: "nginx", RiskClass: RiskClassLow},
+		{Kind: KindPackage, Target: "kernel-core", RiskClass: RiskClassHigh},
+	}}
+	if got := p.MaxRisk(); got != RiskClassHigh {
+		t.Errorf("MaxRisk() = %q, want %q", got, RiskClassHigh)
+	}
+}
+
+// TestPlan_Validate_Rejects 覆盖 Plan 的等式类拒绝分支:
+// blast_radius.max_risk / blast_radius.count 与 intents/machines 的实际值脱钩
+// 会让调度器按错误的风险半径行事,必须红;另有批处理尺寸、负停机时间、
+// 支持等级、节点形态与空 intents 的形态拒绝。
+func TestPlan_Validate_Rejects(t *testing.T) {
+	cases := []struct {
+		name    string
+		plan    Plan
+		wantSub string // 错误消息必须点名的字段
+	}{
+		{"max_risk 低于 intents 实际最大", lowRadiusPlan(), `blast_radius.max_risk`},
+		{"count 与 machines 不符", mismatchedCountPlan(), `blast_radius.count`},
+		{"count 策略缺 Size", zeroSizePlan(), `batching.size`},
+		{"负 max_downtime", negativeDowntimePlan(), `blast_radius.max_downtime_ns`},
+		{"非法 support_level", badSupportLevelPlan(), `support_level`},
+		{"machine.kind 用资源枚举值", badMachineKindPlan("service"), `machines[].kind`},
+		{"machine.kind 空串", badMachineKindPlan(""), `machines[].kind`},
+		{"空 intents", Plan{}, `intents`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.plan.Validate()
+			if err == nil {
+				t.Fatal("应拒绝")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("报错未点名 %q, got: %s", tc.wantSub, err)
+			}
+		})
+	}
+}
+
+// validPlan 是 T2/T4 拒绝用例的基例:一个形状完整、自洽、可过校验的 Plan。
+func validPlan() Plan {
+	return Plan{
+		ID: "0123456789abcdef",
+		Intents: []Intent{
+			{Kind: KindService, Target: "nginx", RiskClass: RiskClassLow},
+			{Kind: KindPackage, Target: "kernel-core", RiskClass: RiskClassHigh},
+		},
+		Machines: []Machine{
+			{MachineID: "ubuntu-24.04-a", Kind: MachineKindAgent, SupportLevel: SupportLevelSupported},
+			{MachineID: "ubuntu-24.04-b", Kind: MachineKindAgent, SupportLevel: SupportLevelSupported},
+			{MachineID: "debian-12-a", Kind: MachineKindAgent, SupportLevel: SupportLevelSupported},
+		},
+		Batching:    Batching{Strategy: BatchingCount, Size: 2},
+		BlastRadius: BlastRadius{Count: 3, MaxRisk: RiskClassHigh, MaxDowntime: 30 * time.Second},
+	}
+}
+
+// lowRadiusPlan 把声明风险压到 low,而 intents 里有一枚 high —— 等式必须拒绝。
+func lowRadiusPlan() Plan {
+	p := validPlan()
+	p.BlastRadius.MaxRisk = RiskClassLow
+	return p
+}
+
+// mismatchedCountPlan 让爆炸半径计数少于实际机器数。
+func mismatchedCountPlan() Plan {
+	p := validPlan()
+	p.BlastRadius.Count = 2
+	return p
+}
+
+// zeroSizePlan 破坏 strategy=count 对 Size>0 的约束。
+func zeroSizePlan() Plan {
+	p := validPlan()
+	p.Batching.Size = 0
+	return p
+}
+
+// negativeDowntimePlan 给出负停机时间。
+func negativeDowntimePlan() Plan {
+	p := validPlan()
+	p.BlastRadius.MaxDowntime = -1
+	return p
+}
+
+// badSupportLevelPlan 把首台机器的支持等级写成词表外的值。
+func badSupportLevelPlan() Plan {
+	p := validPlan()
+	p.Machines[0].SupportLevel = "beta"
+	return p
+}
+
+// badMachineKindPlan 把首台机器的节点形态换成入参(资源 Kind 值或空串都非法)。
+func badMachineKindPlan(kind MachineKind) Plan {
+	p := validPlan()
+	p.Machines[0].Kind = kind
+	return p
 }
