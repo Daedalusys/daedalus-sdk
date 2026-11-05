@@ -33,6 +33,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 不把 GITHUB_TOKEN 持久化进 .git/config:goreleaser 从 env 取
+          # GITHUB_TOKEN(sdk release 步骤显式传 secrets.GITHUB_TOKEN),不读
+          # .git/config 的 http.extraheader;fetch-depth: 0 取历史同样不需要凭据。
+          persist-credentials: false
           # goreleaser 需要完整 git 历史(计算 changelog 与 tag 信息)
           fetch-depth: 0
 
@@ -40,6 +44,9 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25.x'
+          # 本 workflow 只由 tag push / workflow_dispatch 触发,不接受 PR ——
+          # 缓存条目不会被 PR 分支写入,故保留 cache(发布腿提速)。
+          cache: true
           cache-dependency-path: go.sum
 
       - name: Go Test
