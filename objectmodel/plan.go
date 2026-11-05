@@ -209,6 +209,11 @@ func (p *Plan) Validate() error {
 		problems = append(problems, fmt.Sprintf(`字段 "blast_radius.count" 与 machines 数量不一致(got %d, want %d)`, p.BlastRadius.Count, want))
 	}
 
+	// 空值表示"尚未收尾",是调度过程中的合法中间态;非空必须是收尾三态之一。
+	if p.Status != "" && !validPlanStatus(p.Status) {
+		problems = append(problems, fmt.Sprintf(`字段 "status" 非法:%q 不在 Plan 状态词表内(paused|dirty|complete,空值表示未收尾)`, p.Status))
+	}
+
 	if len(problems) > 0 {
 		return fmt.Errorf("objectmodel: Plan 校验失败: %s", strings.Join(problems, "; "))
 	}

@@ -143,3 +143,23 @@ func badMachineKindPlan(kind MachineKind) Plan {
 	p.Machines[0].Kind = kind
 	return p
 }
+
+// TestPlan_Status_Vocabulary 钉住 Plan 状态的封闭词表:三态 + 空值。
+// 空值必须放过——调度器用"尚未收尾"表达进行中的 Plan,把空值判非法会让
+// 运行中的 Plan 无法表达自身状态;表外词必须拒(VISION 展示面只有三态)。
+func TestPlan_Status_Vocabulary(t *testing.T) {
+	for _, s := range []PlanStatus{"", PlanStatusPaused, PlanStatusDirty, PlanStatusComplete} {
+		p := validPlan()
+		p.Status = s
+		if err := p.Validate(); err != nil {
+			t.Errorf("status %q 应放过, got %v", s, err)
+		}
+	}
+	for _, s := range []PlanStatus{"queued", "running", "advanced", "succeeded", "paused_dirty"} {
+		p := validPlan()
+		p.Status = s
+		if err := p.Validate(); err == nil {
+			t.Errorf("status %q 必须拒(表外词),got nil", s)
+		}
+	}
+}
