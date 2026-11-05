@@ -31,3 +31,13 @@ output_dirs = ["/tmp"]
 post_check_commands = ["nginx"]
 reload_services = ["nginx"]
 secret_sources = ["kwallet"]
+
+# fleet 段取值同样刻意偏离 Default()(用短列表与不同数值),证明 [fleet]
+# 各字段逐字段透传解析。
+[fleet]
+high_risk_packages = ["kernel"]
+high_risk_path_prefixes = ["/etc"]
+high_risk_services = ["sshd"]
+high_risk_adapters = ["bootc.upgrade"]
+transient_retry_max = 5
+heartbeat_timeout_seconds = 60

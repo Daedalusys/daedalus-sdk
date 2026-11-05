@@ -925,3 +925,190 @@ func TestPolicy_AuditStateThresholds_DriftWithRealToml(t *testing.T) {
 		t.Errorf("state.max_size_mb 漂移: %d vs %d", real.State.MaxSizeMB, def.State.MaxSizeMB)
 	}
 }
+
+// === [fleet] 风险默认值(跨机 Plan 的默认风险分类) ===
+
+// fleetBasePolicy 是最小但完整的一份合法 policy.toml 正文(只含 validate()
+// 要求的必需节),末尾留给调用方拼 [fleet] 段。
+const fleetBasePolicy = `[shell]
+allowed_commands = ["echo", "date"]
+binary_dirs = ["/usr/bin", "/bin"]
+allowed_path_prefixes = ["/tmp"]
+blocked_paths = ["/root"]
+clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
+timeout_ms = 5000
+
+[fs]
+allowed_dirs = ["/tmp"]
+
+[audit]
+log_path = "/tmp/daedalus-policy-test-audit.jsonl"
+max_size_mb = 256
+retain_days = 30
+
+[state]
+max_size_mb = 64
+
+[objectmodel]
+enabled_kinds = ["service"]
+
+[blueprints]
+output_dirs = ["/tmp"]
+post_check_commands = ["grep"]
+reload_services = ["nginx"]
+secret_sources = ["kwallet"]
+
+`
+
+// writeFleetPolicy 把 [fleet] 段拼到最小合法策略之后落盘,返回文件路径。
+func writeFleetPolicy(t *testing.T, fleetSection string) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "policy.toml")
+	if err := os.WriteFile(p, []byte(fleetBasePolicy+fleetSection), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// validFleetSection 是合法 [fleet] 段(正样本控制组)。
+const validFleetSection = `[fleet]
+high_risk_packages = ["kernel"]
+high_risk_path_prefixes = ["/etc"]
+high_risk_services = ["sshd"]
+high_risk_adapters = ["bootc.upgrade"]
+transient_retry_max = 3
+heartbeat_timeout_seconds = 30
+`
+
+// TestPolicy_Fleet_DefaultMatchesRealToml 钉住 [fleet] 节的三点漂移一环:
+// Default().Fleet 与仓库真实 policy.toml 的六个键逐项一致。
+func TestPolicy_Fleet_DefaultMatchesRealToml(t *testing.T) {
+	t.Setenv(policy.EnvPolicyPath, "")
+	st, err := os.Stat(policy.ProductionPath)
+	if err == nil && !st.IsDir() {
+		t.Skipf("本机存在 %s,无法演练开发态回溯", policy.ProductionPath)
+	}
+	repoPolicy, err := policy.ResolvePath()
+	if err != nil {
+		t.Fatalf("开发态回溯未命中仓库 policy.toml: %v", err)
+	}
+	real, err := policy.Load(repoPolicy)
+	if err != nil {
+		t.Fatalf("镜像 policy.toml 未通过自身校验(含 [fleet] 段): %v", err)
+	}
+	def := policy.Default()
+	if !slices.Equal(real.Fleet.HighRiskPackages, def.Fleet.HighRiskPackages) {
+		t.Errorf("fleet.high_risk_packages 漂移: %v vs %v", real.Fleet.HighRiskPackages, def.Fleet.HighRiskPackages)
+	}
+	if !slices.Equal(real.Fleet.HighRiskPathPrefixes, def.Fleet.HighRiskPathPrefixes) {
+		t.Errorf("fleet.high_risk_path_prefixes 漂移: %v vs %v", real.Fleet.HighRiskPathPrefixes, def.Fleet.HighRiskPathPrefixes)
+	}
+	if !slices.Equal(real.Fleet.HighRiskServices, def.Fleet.HighRiskServices) {
+		t.Errorf("fleet.high_risk_services 漂移: %v vs %v", real.Fleet.HighRiskServices, def.Fleet.HighRiskServices)
+	}
+	if !slices.Equal(real.Fleet.HighRiskAdapters, def.Fleet.HighRiskAdapters) {
+		t.Errorf("fleet.high_risk_adapters 漂移: %v vs %v", real.Fleet.HighRiskAdapters, def.Fleet.HighRiskAdapters)
+	}
+	if real.Fleet.TransientRetryMax != def.Fleet.TransientRetryMax {
+		t.Errorf("fleet.transient_retry_max 漂移: %d vs %d", real.Fleet.TransientRetryMax, def.Fleet.TransientRetryMax)
+	}
+	if real.Fleet.HeartbeatTimeoutSeconds != def.Fleet.HeartbeatTimeoutSeconds {
+		t.Errorf("fleet.heartbeat_timeout_seconds 漂移: %d vs %d", real.Fleet.HeartbeatTimeoutSeconds, def.Fleet.HeartbeatTimeoutSeconds)
+	}
+}
+
+// TestPolicy_Fleet_AcceptsValidSection 是正样本:合法 [fleet] 段必须 Load 成功
+// (避免"全拒"式的假绿)。
+func TestPolicy_Fleet_AcceptsValidSection(t *testing.T) {
+	if _, err := policy.Load(writeFleetPolicy(t, validFleetSection)); err != nil {
+		t.Fatalf("合法 [fleet] 段被拒: %v", err)
+	}
+}
+
+// TestPolicy_Fleet_RejectsEmptyList 证明四个列表任一为空即 fail-closed,
+// 且报错点名具体键。
+func TestPolicy_Fleet_RejectsEmptyList(t *testing.T) {
+	cases := []struct {
+		name    string
+		section string
+		wantSub string
+	}{
+		{
+			"high_risk_packages 为空",
+			"[fleet]\nhigh_risk_packages = []\nhigh_risk_path_prefixes = [\"/etc\"]\nhigh_risk_services = [\"sshd\"]\nhigh_risk_adapters = [\"bootc.upgrade\"]\ntransient_retry_max = 3\nheartbeat_timeout_seconds = 30\n",
+			"fleet.high_risk_packages",
+		},
+		{
+			"high_risk_path_prefixes 为空",
+			"[fleet]\nhigh_risk_packages = [\"kernel\"]\nhigh_risk_path_prefixes = []\nhigh_risk_services = [\"sshd\"]\nhigh_risk_adapters = [\"bootc.upgrade\"]\ntransient_retry_max = 3\nheartbeat_timeout_seconds = 30\n",
+			"fleet.high_risk_path_prefixes",
+		},
+		{
+			"high_risk_services 为空",
+			"[fleet]\nhigh_risk_packages = [\"kernel\"]\nhigh_risk_path_prefixes = [\"/etc\"]\nhigh_risk_services = []\nhigh_risk_adapters = [\"bootc.upgrade\"]\ntransient_retry_max = 3\nheartbeat_timeout_seconds = 30\n",
+			"fleet.high_risk_services",
+		},
+		{
+			"high_risk_adapters 为空",
+			"[fleet]\nhigh_risk_packages = [\"kernel\"]\nhigh_risk_path_prefixes = [\"/etc\"]\nhigh_risk_services = [\"sshd\"]\nhigh_risk_adapters = []\ntransient_retry_max = 3\nheartbeat_timeout_seconds = 30\n",
+			"fleet.high_risk_adapters",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := policy.Load(writeFleetPolicy(t, tc.section))
+			if err == nil {
+				t.Fatal("空列表必须 fail-closed 拒绝")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("报错未点名 %s: %v", tc.wantSub, err)
+			}
+		})
+	}
+}
+
+// TestPolicy_Fleet_RejectsNonPositiveTimeouts 证明两个超时/次数必须为正,
+// 且报错点名具体键。
+func TestPolicy_Fleet_RejectsNonPositiveTimeouts(t *testing.T) {
+	cases := []struct {
+		name    string
+		section string
+		wantSub string
+	}{
+		{
+			"transient_retry_max 为零",
+			"[fleet]\nhigh_risk_packages = [\"kernel\"]\nhigh_risk_path_prefixes = [\"/etc\"]\nhigh_risk_services = [\"sshd\"]\nhigh_risk_adapters = [\"bootc.upgrade\"]\ntransient_retry_max = 0\nheartbeat_timeout_seconds = 30\n",
+			"fleet.transient_retry_max",
+		},
+		{
+			"heartbeat_timeout_seconds 为负",
+			"[fleet]\nhigh_risk_packages = [\"kernel\"]\nhigh_risk_path_prefixes = [\"/etc\"]\nhigh_risk_services = [\"sshd\"]\nhigh_risk_adapters = [\"bootc.upgrade\"]\ntransient_retry_max = 3\nheartbeat_timeout_seconds = -1\n",
+			"fleet.heartbeat_timeout_seconds",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := policy.Load(writeFleetPolicy(t, tc.section))
+			if err == nil {
+				t.Fatal("非正超时必须 fail-closed 拒绝")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("报错未点名 %s: %v", tc.wantSub, err)
+			}
+		})
+	}
+}
+
+// TestPolicy_Fleet_UnknownKeyRejected 证明 [fleet] 下的未知键被 fail-closed
+// 拦截并点名(防拼写错误成为静默的第二事实源)。
+func TestPolicy_Fleet_UnknownKeyRejected(t *testing.T) {
+	section := validFleetSection + "bogus = 1\n"
+	_, err := policy.Load(writeFleetPolicy(t, section))
+	if err == nil {
+		t.Fatal("未知键必须 fail-closed 拒绝")
+	}
+	if !strings.Contains(err.Error(), "fleet.bogus") {
+		t.Errorf("报错未点名 fleet.bogus: %v", err)
+	}
+}
