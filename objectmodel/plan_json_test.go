@@ -6,10 +6,11 @@ package objectmodel
 //     proto/agent/v1 的枚举同源(枚举名去掉前缀转小写即本仓 token)。
 //
 // protobuf 依赖只出现在本 _test.go:objectmodel 的生产代码零 proto 依赖,
-// 生产代码只 import stdlib(见 Global Constraint)。
+// 只 import stdlib。
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -21,13 +22,11 @@ import (
 // planGoldenJSON 是 Plan 的线上契约冻结串:键名 snake_case、键序 = 字段
 // 声明序。intents[].kind 与 machines[].kind 同名不同域——前者是资源类别
 // (service/package),后者是节点形态(agent/atomic),两处取值不重叠。
-const planGoldenJSON = `{"id":"0123456789abcdef","intents":[{"kind":"service","target":"nginx","spec":{"desired_state":"active"},"expected_diff":"reload nginx","risk_class":"low"},{"kind":"package","target":"kernel-core","spec":{"version":"6.11"},"expected_diff":"+ kernel-core","risk_class":"high"}],"machines":[{"machine_id":"ubuntu-24.04-a","kind":"agent","support_level":"supported"},{"machine_id":"ubuntu-24.04-b","kind":"agent","support_level":"supported"},{"machine_id":"debian-12-a","kind":"agent","support_level":"experimental"}],"batching":{"strategy":"count","size":2},"blast_radius":{"count":3,"kind_breakdown":{"package":2,"service":1},"max_downtime_ns":30000000000,"max_risk":"high"},"status":"dirty"}`
+const planGoldenJSON = `{"id":"0123456789abcdef","intents":[{"kind":"service","target":"nginx","spec":{"desired_state":"active"},"expected_diff":"reload nginx","risk_class":"low"},{"kind":"package","target":"kernel-core","spec":{"version":"6.11"},"expected_diff":"+ kernel-core","risk_class":"high"}],"machines":[{"machine_id":"ubuntu-24.04-a","kind":"agent","support_level":"supported"},{"machine_id":"ubuntu-24.04-b","kind":"agent","support_level":"supported"},{"machine_id":"debian-12-a","kind":"agent","support_level":"experimental"}],"batching":{"strategy":"count","size":2},"blast_radius":{"count":3,"kind_breakdown":{"package":1,"service":1},"max_downtime_ns":30000000000,"max_risk":"high"},"status":"dirty"}`
 
-// TestPlan_JSONShape_Full 逐字节冻结 Plan 的 JSON 形态。控制面与 agent
-// 双侧按字面键解析,一次"顺手改名"(risk_class→riskClass)即静默破坏线上协议,
-// 故此处不做结构断言而做整串比对。
-func TestPlan_JSONShape_Full(t *testing.T) {
-	plan := Plan{
+// goldenPlan 是金样的源 Plan:形状完整、自洽(爆炸半径与机器集、意图集对得上)。
+func goldenPlan() Plan {
+	return Plan{
 		ID: "0123456789abcdef",
 		Intents: []Intent{
 			{
@@ -53,19 +52,48 @@ func TestPlan_JSONShape_Full(t *testing.T) {
 		Batching: Batching{Strategy: BatchingCount, Size: 2},
 		BlastRadius: BlastRadius{
 			Count:         3,
-			KindBreakdown: map[string]int{"service": 1, "package": 2},
+			KindBreakdown: map[string]int{"service": 1, "package": 1},
 			MaxDowntime:   30 * time.Second,
 			MaxRisk:       RiskClassHigh,
 		},
 		Status: PlanStatusDirty,
 	}
+}
 
-	b, err := json.Marshal(plan)
+// TestPlan_JSONShape_Full 逐字节冻结 Plan 的 JSON 形态。控制面与 agent
+// 双侧按字面键解析,一次"顺手改名"(risk_class→riskClass)即静默破坏线上协议,
+// 故此处不做结构断言而做整串比对。
+func TestPlan_JSONShape_Full(t *testing.T) {
+	b, err := json.Marshal(goldenPlan())
 	if err != nil {
 		t.Fatalf("序列化失败: %v", err)
 	}
 	if string(b) != planGoldenJSON {
 		t.Fatalf("Plan JSON 漂移:\n got %s\nwant %s", b, planGoldenJSON)
+	}
+}
+
+// TestPlan_JSONShape_Full_BlastRadiusMatchesIntents 钉住金样自洽:
+// blast_radius 的两个数值字段是派生值——count = len(machines),
+// kind_breakdown = 按 intent 资源 kind 的计数。金样是跨仓对账锚点,
+// 自带的数必须算得出来,否则对账会先在锚点本身崩。
+func TestPlan_JSONShape_Full_BlastRadiusMatchesIntents(t *testing.T) {
+	var plan Plan
+	if err := json.Unmarshal([]byte(planGoldenJSON), &plan); err != nil {
+		t.Fatalf("金样不是合法 Plan JSON: %v", err)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Fatalf("金样必须是合法 Plan: %v", err)
+	}
+	wantBreakdown := map[string]int{}
+	for _, in := range plan.Intents {
+		wantBreakdown[string(in.Kind)]++
+	}
+	if !maps.Equal(plan.BlastRadius.KindBreakdown, wantBreakdown) {
+		t.Errorf("金样 kind_breakdown 与 intents 不符: got %v, want %v", plan.BlastRadius.KindBreakdown, wantBreakdown)
+	}
+	if plan.BlastRadius.Count != len(plan.Machines) {
+		t.Errorf("金样 blast_radius.count = %d, want %d", plan.BlastRadius.Count, len(plan.Machines))
 	}
 }
 

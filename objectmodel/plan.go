@@ -154,6 +154,10 @@ func (p Plan) MaxRisk() RiskClass {
 // Object.Validate 同风格)。校验次序钉死:
 // ID → Intents → Machines → Batching → BlastRadius → Status。
 func (p *Plan) Validate() error {
+	if p == nil {
+		return fmt.Errorf("objectmodel: Plan 缺失:不得为 nil")
+	}
+
 	var problems []string
 
 	if p.ID == "" {
@@ -170,6 +174,9 @@ func (p *Plan) Validate() error {
 		} else if !validKind(in.Kind) {
 			problems = append(problems, fmt.Sprintf(`字段 "%s.kind" 非法:%q 不在资源类别枚举内`, prefix, in.Kind))
 		}
+		if in.Target == "" {
+			problems = append(problems, fmt.Sprintf(`字段 "%s.target" 缺失:必填,取值为被施力的资源名`, prefix))
+		}
 		if !validRiskClass(in.RiskClass) {
 			problems = append(problems, fmt.Sprintf(`字段 "%s.risk_class" 非法:%q 不在风险词表内(low|high)`, prefix, in.RiskClass))
 		}
@@ -178,7 +185,19 @@ func (p *Plan) Validate() error {
 		}
 	}
 
+	seenMachines := make(map[string]struct{}, len(p.Machines))
 	for _, m := range p.Machines {
+		// machine_id 是控制面查节点注册表的唯一键,也是 intent_id 的组成段:
+		// 空值让查询落空,重复值让两次下发撞同一个审计键,二者都 fail-closed。
+		switch {
+		case m.MachineID == "":
+			problems = append(problems, `字段 "machines[].machine_id" 缺失:必填`)
+		default:
+			if _, dup := seenMachines[m.MachineID]; dup {
+				problems = append(problems, fmt.Sprintf(`字段 "machines[].machine_id" 非法:machine_id %q 重复`, m.MachineID))
+			}
+			seenMachines[m.MachineID] = struct{}{}
+		}
 		if !m.Kind.Valid() {
 			problems = append(problems, fmt.Sprintf(`字段 "machines[].kind" 非法:%q 不在节点形态词表内(atomic|agent)`, m.Kind))
 		}

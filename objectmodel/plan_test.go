@@ -2,6 +2,7 @@ package objectmodel
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +14,60 @@ func TestPlan_IsNotAResourceKind(t *testing.T) {
 	if len(AllKinds()) != 7 {
 		t.Fatalf("AllKinds 数量 = %d, want 7(Plan 不得进封闭枚举)", len(AllKinds()))
 	}
-	p := Plan{Intents: []Intent{{Kind: Kind("plan"), RiskClass: RiskClassLow}}}
-	if err := p.Validate(); err == nil {
+	if slices.Contains(AllKinds(), Kind("plan")) {
+		t.Fatal(`"plan" 出现在资源 Kind 注册表里——Plan 不是资源类别`)
+	}
+	if validKind(Kind("plan")) {
+		t.Fatal(`validKind("plan") = true——"plan" 不得进 kindRegistry`)
+	}
+
+	// 端到端:除 intents[0].kind 外全字段合法的 Plan,必须且仅因该字段被拒。
+	// (裸 Plan 会在 id/batching/max_risk 上先报错,证明不了 kind 这一条。)
+	p := validPlan()
+	p.Intents[0].Kind = Kind("plan")
+	err := p.Validate()
+	if err == nil {
 		t.Fatal(`Kind("plan") 必须被拒——Plan 不是资源类别`)
+	}
+	if !strings.Contains(err.Error(), "intents[0].kind") {
+		t.Errorf("报错未点名 intents[0].kind, got: %s", err)
+	}
+}
+
+// TestPlan_Validate_NilReceiver 钉住 nil 走 fail-closed 而非 panic:
+// 校验器是被喂畸形输入的那一层,自己不能先崩。
+func TestPlan_Validate_NilReceiver(t *testing.T) {
+	var p *Plan
+	if err := p.Validate(); err == nil {
+		t.Fatal("nil Plan 必须被拒,而不是 panic")
+	}
+}
+
+// TestPlan_Validate_Rejects_AddressingKeys 钉住寻址键的必填与唯一性:
+// machine_id 是控制面查节点注册表的唯一键,也是 intent_id 的组成部分,
+// 空值或重复会让两次下发撞同一个审计键;intent 缺 target 则无施力对象。
+func TestPlan_Validate_Rejects_AddressingKeys(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*Plan)
+		wantSub string // 错误消息必须点名的字段
+	}{
+		{"空 target", func(p *Plan) { p.Intents[0].Target = "" }, `intents[0].target`},
+		{"空 machine_id", func(p *Plan) { p.Machines[0].MachineID = "" }, `machines[].machine_id`},
+		{"重复 machine_id", func(p *Plan) { p.Machines[1].MachineID = p.Machines[0].MachineID }, `machines[].machine_id`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validPlan()
+			tc.mutate(&p)
+			err := p.Validate()
+			if err == nil {
+				t.Fatal("应拒绝")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("报错未点名 %q, got: %s", tc.wantSub, err)
+			}
+		})
 	}
 }
 
@@ -84,7 +136,7 @@ func TestPlan_Validate_Rejects(t *testing.T) {
 	}
 }
 
-// validPlan 是 T2/T4 拒绝用例的基例:一个形状完整、自洽、可过校验的 Plan。
+// validPlan 是拒绝用例的基例:一个形状完整、自洽、可过校验的 Plan。
 func validPlan() Plan {
 	return Plan{
 		ID: "0123456789abcdef",
