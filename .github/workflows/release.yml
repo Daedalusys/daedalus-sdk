@@ -1,33 +1,31 @@
 ---
-# daedalus-sdk 仓 release pipeline(拆仓后本文件即 SDK 仓的
-# .github/workflows/release.yml;review Oracle Issue 2 + Issue 6 新增)。
+# daedalus-sdk 仓 release pipeline。
 #
-# 背景:原 plan 漏了 SDK 的 release pipeline,第三方无法
-# `go get github.com/Daedalusys/daedalus-sdk@vX.Y.Z`。本 workflow 补上:
+# 目的:第三方能 `go get github.com/Daedalusys/daedalus-sdk@vX.Y.Z`(`go get`
+# 只依赖 git tag;semver 化的 source tarball 与 SBOM 是随 release 分发的资产)。
 #   - tag-driven:推送 v* tag 触发(如 v0.1.0)
 #   - go test ./... 守门
-#   - goreleaser 发布(review Oracle Issue 6 定版:SLSA L2 provenance + SBOM
-#     用 goreleaser 原生支持,不用 gh release create 手工拼)
-#   - 上传 semver 化的 source tarball + provenance attestations(SLSA build
-#     level 2 目标)
+#   - goreleaser 发布 source tarball + SBOM(syft)
 #
-# 配置见仓根 .goreleaser.yml(SDK 是纯库无二进制,只产 source tarball +
-# SBOM + provenance)。
+# SLSA provenance 尚未接:goreleaser 没有原生 provenance 支持,得另走
+# slsa-github-generator 复用 workflow(issue #40 跟踪)。在此之前本 workflow
+# 不申请 id-token 权限,也不对外声称产出了 attestation。
+#
+# 配置见仓根 .goreleaser.yml(SDK 是纯库无二进制)。
 name: SDK Release
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
 
-# goreleaser 需要创建 GitHub release(contents: write)与 OIDC token
-# (id-token: write,SLSA provenance 签名用)。
+# goreleaser 需要创建 GitHub release 并上传资产(contents: write)。
+# 不申请 id-token:当前没有 provenance 签名步骤(见文件头)。
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   release:
-    name: Release (goreleaser, SLSA L2)
+    name: Release (goreleaser, source + SBOM)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -54,10 +52,14 @@ jobs:
         shell: bash
         run: go test ./...
 
+      - name: Install syft (SBOM 生成器)
+        # goreleaser 的 `sboms` 段默认 `cmd: syft`,而 GitHub 托管 runner 不预装;
+        # 缺 syft 时 goreleaser 会在 SBOM 步直接失败。
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+
       - name: Run GoReleaser
-        # goreleaser 原生产出:source tarball + SBOM(syft)+ SLSA provenance
-        # (cosign,经 OIDC 签名),并创建 GitHub release 上传全部资产。
-        # --clean 清掉上一轮 dist/ 残留,保证可复现。
+        # goreleaser 产出:source tarball + SBOM(syft),并创建 GitHub release
+        # 上传全部资产。--clean 清掉上一轮 dist/ 残留,保证可复现。
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser

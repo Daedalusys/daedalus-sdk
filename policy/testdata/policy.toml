@@ -125,3 +125,32 @@ default = "unmanaged"
 # service 一律 observe:用户能看见 drift 但 controller 不会自动驱动;
 # 用户切到 managed/reconcile 时需要按 kind/name 粒度显式声明(P4.5 overrides 切片)。
 service = "observe"
+
+[fleet]
+# 跨机 Plan 的风险默认值策略节(第八策略节;与 [shell]/[fs]/[audit]/[objectmodel]/
+# [blueprints]/[confirmation]/[ownership] 并列):声明式列出哪些 (kind, target)
+# 组合默认为高危。控制面据此把每条 intent 判成 low / high,并决定失败分桶:
+# low 的瞬时失败可自动重试,high 的任何失败立即暂停整批。
+# fail-closed:表外 kind 或无法判定一律折向 high;四个列表任一为空、或两个数值
+# 非正,均视为损坏策略,启动拒绝加载。人审可显式把 low 标 high,反向不成立。
+# 本值与 policy.Default() 由三点漂移测试
+# (TestPolicy_Fleet_DefaultMatchesRealToml)钉死,且与 daedalus-core 的生产
+# policy.toml 逐字节一致(CI 的 testdata drift gate 守门)。
+
+# package.set 触即高危的包名/前缀(内核与 security 包)。
+high_risk_packages = ["kernel", "systemd", "dbus", "NetworkManager", "selinux", "polkit", "openssh"]
+
+# file.set 触即高危的路径前缀('/' 边界匹配:/etc 命中 /etc/...,不命中 /etcfoo/...)。
+high_risk_path_prefixes = ["/etc", "/boot", "/usr", "/var/lib"]
+
+# service.set 触即高危的 systemd 单元名/前缀。
+high_risk_services = ["systemd", "dbus", "NetworkManager", "sshd"]
+
+# 无条件高危的适配器(bootc 升级/切换/回滚)。
+high_risk_adapters = ["bootc.switch", "bootc.upgrade", "bootc.rollback"]
+
+# 低危 intent 遇瞬时失败时的最大自动重试次数。
+transient_retry_max = 3
+
+# agent 心跳超时(秒),与 agent 侧心跳间隔同源。
+heartbeat_timeout_seconds = 30

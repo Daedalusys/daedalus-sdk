@@ -132,6 +132,26 @@ type DiskClean struct {
 	OldKernelDirPattern string   `toml:"old_kernel_dir_pattern"`
 }
 
+// Fleet 对应 TOML [fleet] 表:跨机 Plan 的风险默认值与调度参数。
+// 本节的判定表是控制面风险分类的单一事实源(内核/security 包、敏感路径、
+// 关键 systemd 单元、bootc 适配器);控制面按它把 intent 判成 low/high,
+// **无法判定一律折向 high**(fail-closed),人审可显式把 low 标 high,反向不成立。
+// 六个键与 policy.Default() 由三点漂移测试钉死。
+type Fleet struct {
+	// HighRiskPackages 是 package.set 触即高危的包名/前缀(内核与 security 包)。
+	HighRiskPackages []string `toml:"high_risk_packages"`
+	// HighRiskPathPrefixes 是 file.set 触即高危的路径前缀(带 '/' 边界匹配)。
+	HighRiskPathPrefixes []string `toml:"high_risk_path_prefixes"`
+	// HighRiskServices 是 service.set 触即高危的 systemd 单元名/前缀。
+	HighRiskServices []string `toml:"high_risk_services"`
+	// HighRiskAdapters 是无条件高危的适配器(bootc 升级/切换/回滚)。
+	HighRiskAdapters []string `toml:"high_risk_adapters"`
+	// TransientRetryMax 是低危 intent 遇瞬时失败时的最大自动重试次数。
+	TransientRetryMax int64 `toml:"transient_retry_max"`
+	// HeartbeatTimeoutSeconds 是 agent 心跳超时(秒),与 agent 侧心跳间隔同源。
+	HeartbeatTimeoutSeconds int64 `toml:"heartbeat_timeout_seconds"`
+}
+
 // OwnershipMode 是资源管理 ownership 模式的封闭枚举(线协议值,逐字对齐
 // docs/desired-state-projection.md §3 与 VISION.md §10 P4)。
 type OwnershipMode string
@@ -199,6 +219,7 @@ type Policy struct {
 	Confirmation Confirmation `toml:"confirmation"`
 	DiskClean    DiskClean    `toml:"diskclean"`
 	Ownership    Ownership    `toml:"ownership"`
+	Fleet        Fleet        `toml:"fleet"`
 }
 
 // ResolvePath 按文档优先级解析策略文件路径。
@@ -306,6 +327,12 @@ func (p *Policy) validate() error {
 	requireList("blueprints.post_check_commands", p.Blueprints.PostCheckCommands)
 	requireList("blueprints.reload_services", p.Blueprints.ReloadServices)
 	requireList("blueprints.secret_sources", p.Blueprints.SecretSources)
+	// [fleet] 四个列表一律非空(fail-closed):风险判定表不得为空,否则
+	// 内核/敏感路径/关键单元会退化成"低危"。
+	requireList("fleet.high_risk_packages", p.Fleet.HighRiskPackages)
+	requireList("fleet.high_risk_path_prefixes", p.Fleet.HighRiskPathPrefixes)
+	requireList("fleet.high_risk_services", p.Fleet.HighRiskServices)
+	requireList("fleet.high_risk_adapters", p.Fleet.HighRiskAdapters)
 
 	if len(p.Shell.CleanEnv) == 0 {
 		missing = append(missing, "shell.clean_env")
@@ -329,6 +356,13 @@ func (p *Policy) validate() error {
 	}
 	if p.State.MaxSizeMB <= 0 {
 		missing = append(missing, "state.max_size_mb")
+	}
+	// fleet 的两个调度/保活参数必须为正(与 shell.timeout_ms 同型)。
+	if p.Fleet.TransientRetryMax <= 0 {
+		missing = append(missing, "fleet.transient_retry_max")
+	}
+	if p.Fleet.HeartbeatTimeoutSeconds <= 0 {
+		missing = append(missing, "fleet.heartbeat_timeout_seconds")
 	}
 
 	if len(missing) > 0 {
@@ -437,6 +471,19 @@ func Default() *Policy {
 			ByKind: map[string]OwnershipMode{
 				"service": OwnershipObserve,
 			},
+		},
+		// Fleet 风险默认值:与生产 policy.toml 的 [fleet] 节逐字一致
+		// (TestPolicy_Fleet_DefaultMatchesRealToml 钉死)。判定表只增不减地
+		// 声明高危面,控制面遇到表外 kind 一律按 high 处理(fail-closed)。
+		Fleet: Fleet{
+			HighRiskPackages: []string{
+				"kernel", "systemd", "dbus", "NetworkManager", "selinux", "polkit", "openssh",
+			},
+			HighRiskPathPrefixes:    []string{"/etc", "/boot", "/usr", "/var/lib"},
+			HighRiskServices:        []string{"systemd", "dbus", "NetworkManager", "sshd"},
+			HighRiskAdapters:        []string{"bootc.switch", "bootc.upgrade", "bootc.rollback"},
+			TransientRetryMax:       3,
+			HeartbeatTimeoutSeconds: 30,
 		},
 	}
 }
