@@ -55,3 +55,46 @@ func TestXattrOps_HasAppend_UnsupportedFS(t *testing.T) {
 		t.Fatalf("want ErrAttrsUnsupported (or nil if fs 支持), got %v", err)
 	}
 }
+
+// TestXattrOps_ClearAppend_RealInode 在**真 inode** 上走一遍 Set→Clear,
+// 钉住「清 append-only 必须以 O_APPEND 打开」这条内核约束。
+//
+// 纯 fake 注入覆盖不到这里:缺陷恰恰是默认实现用 O_RDWR 无 O_APPEND 打开
+// +a 文件,被 may_open 判 EPERM,于是轮转永远中止。若没有真 inode 用例,
+// 这条路径只由 fake 覆盖,缺陷会一直潜伏到日志长大后才在真机上暴露。
+func TestXattrOps_ClearAppend_RealInode(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("FS_APPEND_FL 需要 CAP_LINUX_IMMUTABLE(root);non-root 环境 skip")
+	}
+	p := filepath.Join(t.TempDir(), "audit.jsonl")
+	if err := os.WriteFile(p, []byte("x\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	var ops xattrOps
+	if err := ops.SetAppend(p); err != nil {
+		if errors.Is(err, ErrAttrsUnsupported) {
+			t.Skipf("当前 fs 不支持 FS_APPEND_FL: %v", err)
+		}
+		t.Fatalf("SetAppend 失败: %v", err)
+	}
+	t.Cleanup(func() { _ = ops.ClearAppend(p) })
+
+	has, err := ops.HasAppend(p)
+	if err != nil {
+		t.Fatalf("HasAppend 失败: %v", err)
+	}
+	if !has {
+		t.Fatalf("SetAppend 后 HasAppend 仍为 false")
+	}
+	// 回归点:旧实现的 os.OpenFile(p, O_RDWR) 在这一步直接 EPERM。
+	if err := ops.ClearAppend(p); err != nil {
+		t.Fatalf("ClearAppend 在真 +a inode 上失败(内核要求带 O_APPEND 打开): %v", err)
+	}
+	has, err = ops.HasAppend(p)
+	if err != nil {
+		t.Fatalf("ClearAppend 后 HasAppend 失败: %v", err)
+	}
+	if has {
+		t.Fatalf("ClearAppend 后 FS_APPEND_FL 仍在")
+	}
+}
