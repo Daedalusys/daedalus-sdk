@@ -249,6 +249,10 @@ func TestLogAudit_RejectsSymlink(t *testing.T) {
 // TestLogAudit_TxBeginAfterRotation_SeedsFromArchiveLastNonTx:轮转后活跃为空时,
 // 新 tx begin 的 tx_prev_hash 应取归档最后一条非 tx 记录的哈希(而非 GenesisHash)。
 func TestLogAudit_TxBeginAfterRotation_SeedsFromArchiveLastNonTx(t *testing.T) {
+	// 本用例验的是链种子逻辑,不验真实 attrs;注入 noop 后轮转末尾不会给活跃文件
+	// 留下 FS_APPEND_FL —— 否则 root 下 t.TempDir 的清理会因 +a 不可 unlink 而失败。
+	// 真实 attrs 路径由 TestRotate_RealAppendOnlyInode 覆盖。
+	withFakeAttrs(t)
 	dir := t.TempDir()
 	p := filepath.Join(dir, "audit.jsonl")
 	ar := filepath.Join(dir, "archive")

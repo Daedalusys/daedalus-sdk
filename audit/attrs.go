@@ -50,8 +50,26 @@ func (xattrOps) HasAppend(p string) (bool, error) {
 	return flags&fsAppendFL != 0, nil
 }
 
+// openForAttrs 以 ioctl 改标志所需的写权限打开文件。
+//
+// 必须带 O_APPEND:内核 may_open 对带 FS_APPEND_FL 的 inode 做硬检查 —— 请求
+// MAY_WRITE 却不带 O_APPEND 直接 EPERM(与 euid 无关)。轮转正是要在 +a 文件上
+// 动标志,漏了 O_APPEND 就让「清 append-only」这一步永远失败。
+func openForAttrs(p string) (*os.File, error) {
+	return os.OpenFile(p, os.O_RDWR|os.O_APPEND, 0)
+}
+
+// setFlags 写回 inode 标志位。
+//
+// FS_IOC_SETFLAGS 要求第三个 ioctl 参数是**指向 int 的指针**;unix.IoctlSetInt
+// 按值直传(内部是 uintptr(value)),内核解引用该"地址"即 EFAULT/bad address。
+// 必须用 IoctlSetPointerInt 才会传 &v。
+func setFlags(f *os.File, flags int) error {
+	return unix.IoctlSetPointerInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags)
+}
+
 func (xattrOps) ClearAppend(p string) error {
-	f, err := os.OpenFile(p, os.O_RDWR, 0)
+	f, err := openForAttrs(p)
 	if err != nil {
 		return err
 	}
@@ -60,11 +78,11 @@ func (xattrOps) ClearAppend(p string) error {
 	if err != nil {
 		return err
 	}
-	return unix.IoctlSetInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags&^fsAppendFL)
+	return setFlags(f, flags&^fsAppendFL)
 }
 
 func (xattrOps) SetAppend(p string) error {
-	f, err := os.OpenFile(p, os.O_RDWR, 0)
+	f, err := openForAttrs(p)
 	if err != nil {
 		return err
 	}
@@ -73,7 +91,7 @@ func (xattrOps) SetAppend(p string) error {
 	if err != nil {
 		return err
 	}
-	return unix.IoctlSetInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags|fsAppendFL)
+	return setFlags(f, flags|fsAppendFL)
 }
 
 // appendOnlyOps 是当前生效的实现(包级单例);SetAppendOnlyOps 替换。
