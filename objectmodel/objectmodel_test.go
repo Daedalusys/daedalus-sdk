@@ -279,7 +279,7 @@ func TestObjectModel_Drift(t *testing.T) {
 		registry:     AllKinds(),
 		defaultKinds: policy.Default().ObjectModel.EnabledKinds,
 		tomlKinds:    loaded.ObjectModel.EnabledKinds,
-		canary:       []string{"service", "package", "task", "container", "policy"}, // v1 冻结字面量:五类启用(2026-10 拉起 task + container + policy kind provider)
+		canary:       []string{"service", "package", "file", "task", "container", "policy"}, // v1 冻结字面量:六类启用(2026-11 拉起 file kind:回滚点为 agent 内建单文件 copy,非宿主 provider)
 	})
 
 	// --- 负例扩展(T1 已钉 "machine"/"Service",此处补足全部大小写变体) ---

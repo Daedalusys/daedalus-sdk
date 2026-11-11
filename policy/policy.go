@@ -435,7 +435,7 @@ func Default() *Policy {
 			MaxSizeMB: 64,
 		},
 		ObjectModel: ObjectModel{
-			EnabledKinds: []string{"service", "package", "task", "container", "policy"},
+			EnabledKinds: []string{"service", "package", "file", "task", "container", "policy"},
 		},
 		Blueprints: Blueprints{
 			OutputDirs:        []string{"/etc/nginx/conf.d", "/etc/haproxy", "/etc/postgresql", "/etc/redis"},
