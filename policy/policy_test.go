@@ -1112,3 +1112,19 @@ func TestPolicy_Fleet_UnknownKeyRejected(t *testing.T) {
 		t.Errorf("报错未点名 fleet.bogus: %v", err)
 	}
 }
+
+// TestPolicy_DefaultEnabledKinds_IncludesFile 钉死 file kind 进入默认启用
+// 白名单:file 的回滚点是 agent 内建的单文件 copy,不经宿主 provider,
+// 但 kind 本身必须在 policy 网关放行,否则该 kind 的任何资源都被 fail-closed 拒。
+func TestPolicy_DefaultEnabledKinds_IncludesFile(t *testing.T) {
+	p := policy.Default()
+	found := false
+	for _, k := range p.ObjectModel.EnabledKinds {
+		if k == "file" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("enabled_kinds 缺 file: %v", p.ObjectModel.EnabledKinds)
+	}
+}

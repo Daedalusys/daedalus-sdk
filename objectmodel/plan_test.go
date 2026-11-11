@@ -11,8 +11,8 @@ import (
 // TestPlan_IsNotAResourceKind 钉住架构裁决:Plan 是下发动作,不是被管理资源。
 // 任何把 "plan" 塞进 kindRegistry 的改动都会在这里变绿——那是回归。
 func TestPlan_IsNotAResourceKind(t *testing.T) {
-	if len(AllKinds()) != 7 {
-		t.Fatalf("AllKinds 数量 = %d, want 7(Plan 不得进封闭枚举)", len(AllKinds()))
+	if len(AllKinds()) != 8 {
+		t.Fatalf("AllKinds 数量 = %d, want 8(Plan 不得进封闭枚举)", len(AllKinds()))
 	}
 	if slices.Contains(AllKinds(), Kind("plan")) {
 		t.Fatal(`"plan" 出现在资源 Kind 注册表里——Plan 不是资源类别`)

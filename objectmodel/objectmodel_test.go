@@ -15,7 +15,7 @@ import (
 	"github.com/Daedalusys/daedalus-sdk/policy"
 )
 
-// TestResource_Validate 证明合法 Resource(七个已定义 Kind × 干净 Name)
+// TestResource_Validate 证明合法 Resource(八个已定义 Kind × 干净 Name)
 // 全部通过校验;空 DesiredState 与通配 "*" Name 亦属合法
 // (daedalus.service 清单声明 resources: [{kind: service, name: "*"}])。
 func TestResource_Validate(t *testing.T) {
@@ -95,7 +95,7 @@ func TestResource_Validate_Aggregates(t *testing.T) {
 	}
 }
 
-// TestKind_Values 锁定七个常量的字面量值为小写形式(线协议契约:
+// TestKind_Values 锁定八个常量的字面量值为小写形式(线协议契约:
 // manifest JSON 与 policy.toml enabled_kinds 都用这些小写 token)。
 func TestKind_Values(t *testing.T) {
 	t.Parallel()
@@ -110,6 +110,7 @@ func TestKind_Values(t *testing.T) {
 		{KindTask, "task"},
 		{KindTransaction, "transaction"},
 		{KindPolicy, "policy"},
+		{KindFile, "file"},
 	}
 	for _, tc := range cases {
 		if string(tc.got) != tc.want {
@@ -278,7 +279,7 @@ func TestObjectModel_Drift(t *testing.T) {
 		registry:     AllKinds(),
 		defaultKinds: policy.Default().ObjectModel.EnabledKinds,
 		tomlKinds:    loaded.ObjectModel.EnabledKinds,
-		canary:       []string{"service", "package", "task", "container", "policy"}, // v1 冻结字面量:五类启用(2026-10 拉起 task + container + policy kind provider)
+		canary:       []string{"service", "package", "file", "task", "container", "policy"}, // v1 冻结字面量:六类启用(2026-11 拉起 file kind:回滚点为 agent 内建单文件 copy,非宿主 provider)
 	})
 
 	// --- 负例扩展(T1 已钉 "machine"/"Service",此处补足全部大小写变体) ---
@@ -295,6 +296,42 @@ func TestObjectModel_Drift(t *testing.T) {
 			if err := res.Validate(); err == nil {
 				t.Errorf("Kind 变体 %q 应被校验器拒绝(未知即拒,大小写敏感)", variant)
 			}
+		}
+	}
+}
+
+func TestKind_FileRegistered(t *testing.T) {
+	all := AllKinds()
+	if len(all) != 8 {
+		t.Fatalf("AllKinds 数量 = %d, want 8", len(all))
+	}
+	if all[len(all)-1] != KindFile {
+		t.Errorf("AllKinds 末尾 = %q, want %q(新 kind 追加到末尾,不打乱既有顺序)", all[len(all)-1], KindFile)
+	}
+	if !validKind(KindFile) {
+		t.Error("validKind(KindFile) = false, want true")
+	}
+}
+
+func TestResource_Validate_FileKindAccepted(t *testing.T) {
+	// Name 仍走"单段无路径语义"契约,文件路径的解析归 agent 侧;
+	// 这里只证明 file 已在封闭枚举内、不被 kind 分支拒。
+	r := Resource{Kind: KindFile, Name: "nginx.conf"}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("file kind 应被校验器接受, got %v", err)
+	}
+}
+
+// TestHasRollbackPoint 钉住内建回滚点表:只有 file 有与宿主无关的内建回滚点
+// (agent 单文件 copy);其余 kind 改的是宿主状态,回滚点取决于节点自带的快照
+// 机制,不由本表回答。
+func TestHasRollbackPoint(t *testing.T) {
+	if !HasRollbackPoint(KindFile) {
+		t.Error("file kind 应当有回滚点")
+	}
+	for _, k := range []Kind{KindService, KindPackage, KindContainer, KindCapability, KindTask, KindTransaction, KindPolicy} {
+		if HasRollbackPoint(k) {
+			t.Errorf("kind %q 不应有内建回滚点", k)
 		}
 	}
 }

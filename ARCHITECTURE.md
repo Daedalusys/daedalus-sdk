@@ -72,7 +72,7 @@ SDK 只定义规则,不强制规则。运行时强制归消费方进程的 syste
 
 ### Object Model
 
-- `Kind`: closed enum(封闭枚举)七类:`service`、`package`、`container`、
+- `Kind`: closed enum(封闭枚举)八类:`service`、`package`、`file`、`container`、
   `capability`、`task`、`transaction`、`policy`;`kindRegistry` 是唯一注册表,
   新增 Kind 必须同步 `policy.toml` 的 `[objectmodel].enabled_kinds`。
 - `Resource`: 三字段元组 `{kind, name, desired_state}`。`kind` 必须命中枚举,

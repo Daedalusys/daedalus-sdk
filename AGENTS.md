@@ -22,7 +22,7 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 ├── pkgquery/      # dnf/rpm 只读查询 (rpm 优先 / dnf repoquery 兜底)
 ├── sysinfo/       # os-release / cpuinfo / meminfo / 网络只读探测
 ├── plugin/        # manifest schema + Pack/Extract/Verify/VerifyDir (zip-slip 九道防线)
-├── objectmodel/   # 对象模型 schema 单一事实源 (Kind 封闭枚举 7 类 + spec/status 信封)
+├── objectmodel/   # 对象模型 schema 单一事实源 (Kind 封闭枚举 8 类 + spec/status 信封)
 ├── i18n/          # locale 文件 + t(key, ...args) 翻译基础设施
 ├── blueprint/     # 蓝图 schema 校验 + 渲染 (jsonschema-go 预编译)
 ├── version/       # 版本常量与构建信息
@@ -61,7 +61,7 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 | `shellpolicy.AllowCommands` | `shellpolicy/allow.go` | 15 命令权威实现;CLEAN_ENV + 30s + rc 126/124 |
 | `pathguard.ValidatePath` / `pathguard.ValidateWritePath` | `pathguard/pathguard.go` | 读档校验(ALLOWED_DIRS 前缀 + realpath 防逃逸);写档二档额外拒写只读系统目录(`/proc`/`/sys`/`/boot`/`/usr`/`/etc`/`/var/lib/rpm`)+ 敏感文件通配(`/etc/shadow`/`/etc/passwd`/`/etc/sudoers*`/`/etc/pam.d/`)+ 强制完整 realpath |
 | `plugin.Manifest` / `plugin.Pack` | `plugin/manifest.go` `plugin/pack.go` | 规范化自摘要 + 逐条目 sha256 + zip-slip 防线 |
-| `objectmodel.Resource` / `Kind` / `AllKinds` | `objectmodel/objectmodel.go` | 三字段元组 (kind/name/desired_state);Kind 封闭枚举 7 类 + 漂移金丝雀锁 |
+| `objectmodel.Resource` / `Kind` / `AllKinds` | `objectmodel/objectmodel.go` | 三字段元组 (kind/name/desired_state);Kind 封闭枚举 8 类 + 漂移金丝雀锁 |
 | `objectmodel.Object` / `Metadata` / `Condition` / `OwnerReference` / `Finalizer` | `objectmodel/envelope.go` + `objectmodel/validate.go` | spec/status 信封(全字段:UID / ResourceVersion / OwnerReferences / Finalizers);`Resource.Object()` 与 `ServiceState.Object()` 双投影;writer `BumpGeneration` / `SetLabel` / `SetAnnotation` / `AddFinalizer` / `RemoveFinalizer`,reader `MatchLabels` / `FilterByLabels` / `HasLabel`,校验 `Metadata.Validate` / `Object.Validate`(sdk#1 P3);`internal/controller` 的同名类型是本包别名 |
 | `blueprint.Registry` / `blueprint.ConfirmToken` | `blueprint/registry.go` `confirm_token.go` | 蓝图加载 + 一次性消费令牌 |
 | `state.Append` / `state.StateEntry` | `state/state.go` | state.jsonl 追加;payload 序列化为 `objectmodel.ServiceState` |
