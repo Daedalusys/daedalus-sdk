@@ -477,7 +477,12 @@ func Default() *Policy {
 		// 声明高危面,控制面遇到表外 kind 一律按 high 处理(fail-closed)。
 		Fleet: Fleet{
 			HighRiskPackages: []string{
-				"kernel", "systemd", "dbus", "NetworkManager", "selinux", "polkit", "openssh",
+				"kernel",
+				// Debian / Ubuntu 的内核与 polkit 包名:只声明 RHEL 系名会让这两类
+				// 发行上的内核升级被判低危而被自动重试。表里是前缀,故不写裸
+				// "linux-"(否则 linux-base / linux-tools 这类无害包也成高危)。
+				"linux-image", "linux-headers", "linux-modules", "linux-firmware", "linux-generic", "linux-signed",
+				"systemd", "dbus", "NetworkManager", "selinux", "polkit", "policykit", "openssh",
 			},
 			HighRiskPathPrefixes:    []string{"/etc", "/boot", "/usr", "/var/lib"},
 			HighRiskServices:        []string{"systemd", "dbus", "NetworkManager", "sshd"},

@@ -137,8 +137,10 @@ service = "observe"
 # (TestPolicy_Fleet_DefaultMatchesRealToml)钉死,且与 daedalus-core 的生产
 # policy.toml 逐字节一致(CI 的 testdata drift gate 守门)。
 
-# package.set 触即高危的包名/前缀(内核与 security 包)。
-high_risk_packages = ["kernel", "systemd", "dbus", "NetworkManager", "selinux", "polkit", "openssh"]
+# package.set 触即高危的包名/前缀(内核与 security 包)。Debian / Ubuntu 的内核与
+# polkit 包名同在表内;表里是前缀,故不写裸 "linux-"(否则 linux-base / linux-tools
+# 这类无害包也成高危)。
+high_risk_packages = ["kernel", "linux-image", "linux-headers", "linux-modules", "linux-firmware", "linux-generic", "linux-signed", "systemd", "dbus", "NetworkManager", "selinux", "polkit", "policykit", "openssh"]
 
 # file.set 触即高危的路径前缀('/' 边界匹配:/etc 命中 /etc/...,不命中 /etcfoo/...)。
 high_risk_path_prefixes = ["/etc", "/boot", "/usr", "/var/lib"]
