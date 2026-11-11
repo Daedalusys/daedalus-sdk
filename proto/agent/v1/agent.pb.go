@@ -50,6 +50,8 @@ const (
 // 探测不到的 backend 不能填对应值;Register handler 必须如实回报,
 // 控制面在人审 Plan 时显示「这台机能 / 不能 snapshot」,让用户在
 // ApplyIntent 前知情。"best-effort rollback" 不能在文案上被读成"一定能"。
+// 只报宿主自带的快照机制。agent 内建的单文件 copy 回滚不在这个字段里表达
+// (它是 agent 的实现细节,不依赖宿主),所以 agent 通常报 NONE 仍然具备 file 级回滚。
 type SnapshotCapability int32
 
 const (
@@ -601,7 +603,8 @@ type ApplyIntentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// 控制面分配;agent 写入本地审计 + 回报
 	IntentId string `protobuf:"bytes,1,opt,name=intent_id,json=intentId,proto3" json:"intent_id,omitempty"`
-	// intent kind: package.set / file.set / service.set / ...
+	// intent kind: 资源 kind 的裸值(service / package / file),与控制面 wire 一致。
+	// package.set / service.set 只是 core 风险判定表内部的适配器名,不出现这里。
 	Kind string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
 	// 目标路径或包名(/etc/nginx/nginx.conf / nginx ...)
 	Target string `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
