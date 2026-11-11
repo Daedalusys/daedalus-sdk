@@ -25,7 +25,7 @@ import (
 // 及 policy.toml enabled_kinds 的取值逐字一致)。
 type Kind string
 
-// 七类资源常量。v1 仅 KindService 有 provider;其余为保留枚举位,校验器接受
+// 八类资源常量。v1 仅 KindService 有 provider;其余为保留枚举位,校验器接受
 // 只是类型层开放,实际放行由 enabled_kinds 策略网关 fail-closed 决定。
 const (
 	KindService     Kind = "service" // systemd 单元(v1 唯一有 provider 的类别: daedalus.service / daedalus-tx)
@@ -35,13 +35,16 @@ const (
 	KindTask        Kind = "task"
 	KindTransaction Kind = "transaction"
 	KindPolicy      Kind = "policy"
+	// KindFile 是被改文件本体,配合 agent 的单文件快照;与 package/service 不同,
+	// 它的回滚点是文件级 copy,不是宿主状态。
+	KindFile Kind = "file"
 )
 
 // kindRegistry 是 Kind 常量的唯一注册表(AllKinds 与校验共用,新增常量
 // 必须同步登记,否则跨包三点漂移测试拒绝)。
 var kindRegistry = []Kind{
 	KindService, KindPackage, KindContainer, KindCapability,
-	KindTask, KindTransaction, KindPolicy,
+	KindTask, KindTransaction, KindPolicy, KindFile,
 }
 
 // AllKinds 返回全部已定义 Kind 常量的副本(顺序稳定;改动返回值不影响内部注册表)。
@@ -49,7 +52,7 @@ func AllKinds() []Kind {
 	return slices.Clone(kindRegistry)
 }
 
-// validKind 报告 k 是否命中注册表。O(7) 线性扫描:常量集极小,
+// validKind 报告 k 是否命中注册表。O(8) 线性扫描:常量集极小,
 // 不值得引入 map 的初始化与共享状态成本。
 func validKind(k Kind) bool {
 	for _, v := range kindRegistry {
