@@ -63,6 +63,14 @@ func validKind(k Kind) bool {
 	return false
 }
 
+// HasRollbackPoint 报告该 kind 有没有**与宿主无关**的内建回滚点。
+// 目前只有 file 有:agent 用单文件 copy 快照还原,任何 ext4/xfs 宿主都成立。
+// package / service 改的是宿主状态,没有内建还原手段,它们的回滚点取决于
+// 节点自带的快照机制 —— 那是节点维度的事,不由本表回答。
+func HasRollbackPoint(k Kind) bool {
+	return k == KindFile
+}
+
 // Resource 是 manifest `resources` 数组的条目类型:插件声明"我管理哪类
 // 资源的哪些实例、期望什么状态"。DesiredState 的取值词汇由各 provider
 // 定义(如 service 的 active/inactive),本层不枚举。

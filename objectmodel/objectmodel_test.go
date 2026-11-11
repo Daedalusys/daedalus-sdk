@@ -321,3 +321,17 @@ func TestResource_Validate_FileKindAccepted(t *testing.T) {
 		t.Fatalf("file kind 应被校验器接受, got %v", err)
 	}
 }
+
+// TestHasRollbackPoint 钉住内建回滚点表:只有 file 有与宿主无关的内建回滚点
+// (agent 单文件 copy);其余 kind 改的是宿主状态,回滚点取决于节点自带的快照
+// 机制,不由本表回答。
+func TestHasRollbackPoint(t *testing.T) {
+	if !HasRollbackPoint(KindFile) {
+		t.Error("file kind 应当有回滚点")
+	}
+	for _, k := range []Kind{KindService, KindPackage, KindContainer, KindCapability, KindTask, KindTransaction, KindPolicy} {
+		if HasRollbackPoint(k) {
+			t.Errorf("kind %q 不应有内建回滚点", k)
+		}
+	}
+}
