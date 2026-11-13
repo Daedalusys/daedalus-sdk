@@ -40,7 +40,7 @@ SDK 包由 `daedalus-core/` 与 `daedalus-plugins/` 经 `replace` 指令本地�
 |----|-----------|------|
 | `slot/` | swappability Level 共享词汇(L0–L3) | contract 已钉 |
 | `secretprovider/` | #33 KWallet + #34 systemd-creds 抽象(引用不持明文,序列化恒脱敏) | contract 已钉 |
-| `memoryprovider/` | #29 持久记忆抽象(scope 封闭枚举,TTL,检索可缺席) | contract 已钉 |
+| `memoryprovider/` | #29 持久记忆抽象(scope 封闭枚举,TTL,检索可缺席) | contract 已钉;builtin:`memoryprovider/jsonl/`(L1 JSONL 文件后端) |
 
 以下目录仍是**占位**(空目录 + README,仅声明 slot 名,不暴露 import;
 issue #46 C3 拍板,等各自议题落地再填实):
