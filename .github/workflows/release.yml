@@ -64,10 +64,11 @@ jobs:
       - name: Run GoReleaser
         # goreleaser 产出:source tarball + SBOM(syft),并创建 GitHub release
         # 上传全部资产。--clean 清掉上一轮 dist/ 残留,保证可复现。
+        # version 钉具体版本:latest 只锁 `~> v2`,小版本会改配置语义且随上游漂。
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
-          version: latest
+          version: 'v2.20.2'
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

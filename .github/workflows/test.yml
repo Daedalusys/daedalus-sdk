@@ -56,6 +56,16 @@ jobs:
           cache: false
           cache-dependency-path: go.sum
 
+      - name: GoReleaser config check
+        # release.yml 只在 tag push 时执行,PR 上没人读 .goreleaser.yml —— 一个
+        # 不存在的配置键会一路活到首个 tag 才爆(本仓 0.1.0 那次就是这么爆的)。
+        # 版本与 release.yml 钉同一档,否则「PR 上 check 过、tag 时换版本又炸」。
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: 'v2.20.2'
+          args: check
+
       - name: Go Vet
         # 静态检查:未用 import / 可疑构造等。
         shell: bash
