@@ -7,9 +7,10 @@
 #   - go test ./... 守门
 #   - goreleaser 发布 source tarball + SBOM(syft)
 #
-# SLSA provenance 尚未接:goreleaser 没有原生 provenance 支持,得另走
-# slsa-github-generator 复用 workflow(issue #40 跟踪)。在此之前本 workflow
-# 不申请 id-token 权限,也不对外声称产出了 attestation。
+# SLSA provenance:goreleaser v2 没有 provenance 配置键,故由本 workflow 用
+# GitHub 原生 artifact attestation(`actions/attest`)对 source tarball 出
+# SLSA v1.0 Build L2 证明;消费方用 `gh attestation verify <tarball> --repo
+# <owner>/<repo>` 校验(不是 slsa-verifier)。
 #
 # 配置见仓根 .goreleaser.yml(SDK 是纯库无二进制)。
 name: SDK Release
@@ -18,10 +19,13 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-# goreleaser 需要创建 GitHub release 并上传资产(contents: write)。
-# 不申请 id-token:当前没有 provenance 签名步骤(见文件头)。
+# contents: goreleaser 创建 GitHub release 并上传资产。
+# id-token: attestation 用 OIDC token 换 Sigstore 签名身份。
+# attestations: attestation 写入本仓 attestation 存储。
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -67,3 +71,11 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest source tarball provenance
+        # subject-path 用 glob:source 管道产物名由 name_template 决定(默认
+        # `<project>-<version>.tar.gz`),写死版本号会随 tag 漂移。attestation
+        # 以文件摘要为 subject,故放在 goreleaser 之后不影响与已上传资产的对应。
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz

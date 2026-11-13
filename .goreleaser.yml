@@ -7,7 +7,7 @@
 #
 # SLSA provenance 不在本配置里:goreleaser v2 没有 provenance 配置键(它只给
 # docker 构建补 --provenance 旗标,对 source 资产无效)。source 资产的 L2
-# attestation 要另走 slsa-github-generator 复用 workflow,见 issue #40。
+# attestation 由 release.yml 的 actions/attest 步骤对 dist/ 产物生成。
 version: 2
 
 project_name: daedalus-sdk
