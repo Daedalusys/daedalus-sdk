@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -217,19 +218,42 @@ func TestEntriesSurviveReopen(t *testing.T) {
 func TestFileIsJSONLines(t *testing.T) {
 	p, _, path := newProvider(t)
 	ctx := context.Background()
-	if err := p.Set(ctx, userEntry("k", `1`, 0)); err != nil {
-		t.Fatalf("Set: %v", err)
+	// 三条里带一条值内嵌换行与引号的:这才能区分「一行一条」与「整个文件一个 JSON」。
+	entries := []memoryprovider.Entry{
+		userEntry("k1", `1`, 0),
+		userEntry("k2", `{"text":"a\nb \"q\""}`, 0),
+		userEntry("k3", `{"n":[1,2]}`, 0),
+	}
+	for _, e := range entries {
+		if err := p.Set(ctx, e); err != nil {
+			t.Fatalf("Set %s: %v", e.Key, err)
+		}
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+		t.Fatal(err)
 	}
-	var rec map[string]any
-	if err := json.Unmarshal([]byte(firstLine(string(raw))), &rec); err != nil {
-		t.Fatalf("每行必须是独立 JSON: %v (行=%q)", err, firstLine(string(raw)))
+	lines := splitLines(string(raw))
+	if len(lines) != len(entries) {
+		t.Fatalf("应恰好 %d 行(一行一条),实际 %d 行", len(entries), len(lines))
 	}
-	if rec["key"] != "k" {
-		t.Fatalf("记录里没有 key 字段: %v", rec)
+	for i, ln := range lines {
+		var rec map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(ln), &rec); err != nil {
+			t.Fatalf("第 %d 行不是独立 JSON: %v (行=%q)", i+1, err, ln)
+		}
+		for _, f := range []string{"key", "value", "scope", "set_at"} {
+			if _, ok := rec[f]; !ok {
+				t.Fatalf("第 %d 行缺字段 %q: %v", i+1, f, rec)
+			}
+		}
+		var key string
+		if err := json.Unmarshal(rec["key"], &key); err != nil {
+			t.Fatal(err)
+		}
+		if key != entries[i].Key {
+			t.Fatalf("第 %d 行应是 %s,实际 %s", i+1, entries[i].Key, key)
+		}
 	}
 }
 
@@ -240,4 +264,144 @@ func firstLine(s string) string {
 		}
 	}
 	return s
+}
+
+// ---- 修复 pass:损坏尾部容忍 / 压缩 / 空值 / 契约断言 / Close ----
+
+func TestNewToleratesTruncatedTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m.jsonl")
+	good := `{"key":"a","value":1,"scope":"user","set_at":"2026-11-13T00:00:00Z"}`
+	// 半截写:进程在写完前被杀,尾行没有闭合。
+	if err := os.WriteFile(path, []byte(good+"\n"+`{"key":"b","val`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := jsonl.New(path, jsonl.Options{})
+	if err != nil {
+		t.Fatalf("尾部半截写不该让 store 打不开: %v", err)
+	}
+	if _, err := p.Get(context.Background(), memoryprovider.ScopeUser, "a"); err != nil {
+		t.Fatalf("完好记录应可读: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(splitLines(string(raw))); n != 1 {
+		t.Fatalf("重开时应把半截尾行清掉,实际剩 %d 行: %q", n, string(raw))
+	}
+}
+
+func TestNewRejectsCorruptionInMiddle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m.jsonl")
+	body := `{"key":"a","scope":"user"}` + "\n" + `not json` + "\n" + `{"key":"c","scope":"user"}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := jsonl.New(path, jsonl.Options{}); err == nil {
+		t.Fatal("中间行损坏必须 fail-closed,不能静默跳过")
+	}
+}
+
+func TestNewCompactsTombstonesAndExpired(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m.jsonl")
+	c := &clock{t: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)}
+	p, err := jsonl.New(path, jsonl.Options{Now: c.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, k := range []string{"keep", "del", "ttl"} {
+		if err := p.Set(ctx, userEntry(k, `1`, 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := p.Delete(ctx, memoryprovider.ScopeUser, "del"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Set(ctx, userEntry("ttl", `1`, time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	c.Advance(2 * time.Minute)
+
+	p2, err := jsonl.New(path, jsonl.Options{Now: c.Now})
+	if err != nil {
+		t.Fatalf("重开: %v", err)
+	}
+	keys, err := p2.List(ctx, memoryprovider.ScopeUser, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0] != "keep" {
+		t.Fatalf("压缩后应只剩 keep,得到 %v", keys)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(splitLines(string(raw))); n != 1 {
+		t.Fatalf("文件应被压缩成 1 行(墓碑与过期行折叠),实际 %d 行", n)
+	}
+}
+
+func TestEmptyValueIsRejected(t *testing.T) {
+	p, _, _ := newProvider(t)
+	err := p.Set(context.Background(), memoryprovider.Entry{Key: "empty", Value: json.RawMessage{}, Scope: memoryprovider.ScopeUser})
+	if !errors.Is(err, jsonl.ErrInvalidValue) {
+		t.Fatalf("空值不是合法 JSON,应在写入口被拒,得到 %v", err)
+	}
+}
+
+func TestNullValueRoundTrips(t *testing.T) {
+	p, c, path := newProvider(t)
+	ctx := context.Background()
+	if err := p.Set(ctx, memoryprovider.Entry{Key: "nil", Value: json.RawMessage("null"), Scope: memoryprovider.ScopeUser}); err != nil {
+		t.Fatal(err)
+	}
+	p2, err := jsonl.New(path, jsonl.Options{Now: c.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := p2.Get(ctx, memoryprovider.ScopeUser, "nil")
+	if err != nil {
+		t.Fatalf("null 值条目必须还在: %v", err)
+	}
+	if string(got.Value) != "null" {
+		t.Fatalf("null 往返后应仍是 null,得到 %q", got.Value)
+	}
+}
+
+func TestProviderSatisfiesContract(t *testing.T) {
+	p, _, _ := newProvider(t)
+	var _ memoryprovider.Provider = p
+}
+
+func TestCloseSyncsAndIsIdempotent(t *testing.T) {
+	p, _, path := newProvider(t)
+	ctx := context.Background()
+	if err := p.Set(ctx, userEntry("k", `1`, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatalf("重复 Close 不该报错: %v", err)
+	}
+	p2, err := jsonl.New(path, jsonl.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p2.Get(ctx, memoryprovider.ScopeUser, "k"); err != nil {
+		t.Fatalf("Close 后数据应已落盘: %v", err)
+	}
+}
+
+func splitLines(s string) []string {
+	var out []string
+	for _, ln := range strings.Split(s, "\n") {
+		if ln != "" {
+			out = append(out, ln)
+		}
+	}
+	return out
 }
