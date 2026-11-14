@@ -335,3 +335,40 @@ func TestHasRollbackPoint(t *testing.T) {
 		}
 	}
 }
+
+// TestAdmitsHighRisk 钉住"高危变更有没有可承诺的还原手段"这张表:file 有
+// 与宿主无关的内建快照;package/service 的回滚点来自执行器在 apply **之后**
+// 填进事务的凭据(dnf history / apt before-state);其余 kind 两样都没有。
+//
+// 这张表必须是控制面准入与 agent 准入共用的唯一事实源 —— 两边各写一份就会
+// 漂移,表现是控制面拒得比执行器还多(真机验收撞过:package 高危在 agent
+// 节点上恒被拒,而 agent 其实收得下)。
+func TestAdmitsHighRisk(t *testing.T) {
+	if !AdmitsHighRisk(KindFile) {
+		t.Error("file:内建快照,应可下发高危")
+	}
+	for _, k := range []Kind{KindPackage, KindService} {
+		if !HasRollbackHandle(k) {
+			t.Errorf("kind %q:应登记为可产回滚凭据", k)
+		}
+		if !AdmitsHighRisk(k) {
+			t.Errorf("kind %q:执行器能产回滚凭据,应可下发高危", k)
+		}
+	}
+	for _, k := range []Kind{KindContainer, KindCapability, KindTask, KindTransaction, KindPolicy} {
+		if HasRollbackHandle(k) {
+			t.Errorf("kind %q:不应登记为可产回滚凭据", k)
+		}
+		if AdmitsHighRisk(k) {
+			t.Errorf("kind %q:既无内建快照也无回滚凭据,不得下发高危", k)
+		}
+	}
+	// 反证:两张表不能互相顶替 —— file 是"apply 之前就有回滚点",package 是
+	// "apply 之后才有凭据"。任何一侧并进另一侧,上面两条断言会同时失效。
+	if HasRollbackHandle(KindFile) {
+		t.Error("file 不该被算成凭据型(它 apply 之前就有回滚点)")
+	}
+	if HasRollbackPoint(KindPackage) {
+		t.Error("package 不该被算成有内建回滚点(凭据只有 apply 之后才知道)")
+	}
+}

@@ -71,6 +71,28 @@ func HasRollbackPoint(k Kind) bool {
 	return k == KindFile
 }
 
+// HasRollbackHandle 报告该 kind 的变更能否由执行器在 apply **之后**产出回滚
+// 凭据(事务句柄)。package / service 的还原手段来自宿主自己的账本
+// (dnf history undo / apt before-state / systemd 单元快照),不是文件系统快照。
+//
+// 与 HasRollbackPoint 分开,是因为两者在时间上不同:内建回滚点在 apply 之前
+// 就成立,凭据型要到 apply 之后才知道抓没抓到(抓不到时执行侧把结局改判成
+// refused)。把两者并成一张表,任一侧的语义都会被另一侧带偏。
+func HasRollbackHandle(k Kind) bool {
+	return k == KindPackage || k == KindService
+}
+
+// AdmitsHighRisk 报告高危变更在该 kind 上有没有**可承诺的还原手段**:
+// 内建回滚点,或执行器可产出的回滚凭据。
+//
+// 这是控制面准入(scheduler 决定发不发 RPC)与 agent 准入(apply_intent
+// 决定收不收)共用的唯一判定。两边各写一份的代价在真机验收里出现过:
+// 控制面只按 kind == file 判,把 package / service 高危全挡在门外,而 agent
+// 本来收得下 —— 同一份契约两种口径。
+func AdmitsHighRisk(k Kind) bool {
+	return HasRollbackPoint(k) || HasRollbackHandle(k)
+}
+
 // Resource 是 manifest `resources` 数组的条目类型:插件声明"我管理哪类
 // 资源的哪些实例、期望什么状态"。DesiredState 的取值词汇由各 provider
 // 定义(如 service 的 active/inactive),本层不枚举。
