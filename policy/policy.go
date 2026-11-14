@@ -6,10 +6,11 @@
 //
 // 路径解析优先级:DAEDALUS_POLICY_PATH 环境变量(显式指向,文件损坏/缺失一律
 // 报错,绝不静默吞掉)→ 生产路径 /opt/daedalus/shared/policy.toml → 开发态
-// 自 cwd 逐级上溯尝试 DevRelPaths 候选。三处皆无 → ErrNotFound;LoadOrDefault
-// 默认同样 fail-closed 拒绝启动(与"损坏拒绝启动"哲学一致),仅显式设置
-// DAEDALUS_POLICY_MODE=development(开发/测试 opt-in)才回退 Default(),
-// 不隐式猜测环境。
+// 自 cwd 逐级上溯尝试 DevRelPaths 候选(既含老布局 daedalus-core/...,也含
+// 与仓目录名无关的 files/system/... 形态,仓副本改名后仍能命中)。三处皆无 →
+// ErrNotFound;LoadOrDefault 默认同样 fail-closed 拒绝启动(与"损坏拒绝启动"
+// 哲学一致),仅显式设置 DAEDALUS_POLICY_MODE=development(开发/测试 opt-in)
+// 才回退 Default(),不隐式猜测环境。
 //
 // ALLOW_COMMANDS 环境变量维持 REPLACE 语义(与 shellpolicy.ResolveAllowCommands
 // 一致):非空时整体替换 allowed_commands,而非取并集。
@@ -41,17 +42,29 @@ const (
 )
 
 // DevRelPaths 是开发态回溯的候选相对路径列表(自 cwd 逐级上溯,每层目录 ×
-// 每个候选嵌套匹配)。顺序即优先级:跨仓平级候选在前,testdata 副本在后
-// (Go test binary CWD = 包目录,level 1 即命中,实际优先于跨仓候选)。
+// 每个候选嵌套匹配)。顺序即优先级:
+//
+//  1. daedalus-core/files/... —— 老布局(仓副本固定叫 daedalus-core)命中面,
+//     放最前是因为它是既有工作流的实际来源,不能被新候选静默挤掉;
+//  2. files/system/opt/daedalus/shared/policy.toml —— 与仓目录名无关的形态。
+//     开发态从"仓副本"跑控制面时,副本目录不保证叫 daedalus-core
+//     (~/daedalus-e2e/core 这类命名很常见),只认仓名的候选会全部落空 →
+//     ErrNotFound → 控制面 fail-closed 拒跑;此候选按仓内路径定位,与改名无关;
+//  3. testdata/policy.toml —— SDK 仓自带 fixture,兜底(CWD 级即命中,实际
+//     优先于跨仓候选:回溯是"层 × 候选",同层内先比候选)。
 var DevRelPaths = []string{
-	"daedalus-core/files/system/opt/daedalus/shared/policy.toml", // 跨仓平级 clone 时命中
-	"testdata/policy.toml", // SDK 仓自带 fixture(CWD 级命中)
+	"daedalus-core/files/system/opt/daedalus/shared/policy.toml", // 跨仓平级 clone 时命中(老布局,优先级最高)
+	"files/system/opt/daedalus/shared/policy.toml",               // 与仓目录名无关:仓副本改名后仍命中
+	"testdata/policy.toml",                                       // SDK 仓自带 fixture(CWD 级命中)
 }
 
 // ErrNotFound 表示按解析优先级未找到任何策略文件(生产语义 fail-closed;
 // 回退 Default() 需 DAEDALUS_POLICY_MODE=development 显式 opt-in);
 // 与"文件存在但损坏/字段缺失"(真解析错误)严格区分,后者必须拒绝启动。
-var ErrNotFound = errors.New("policy: 未找到 policy.toml(生产路径与仓库回溯均未命中)")
+// 文案带解法:调用方可用 DAEDALUS_POLICY_PATH 显式指定策略文件路径,
+// 无需依赖目录布局猜测。
+var ErrNotFound = errors.New("policy: 未找到 policy.toml(生产路径与仓库回溯均未命中;可用环境变量 " +
+	EnvPolicyPath + " 显式指定策略文件路径)")
 
 // policyDisabledSentinel 是 daedalus-tx policy.set absent Apply 写入的首行标记。
 // policy.Load 检测到它即返回 ErrDisabled(不是 ErrNotFound,不是解析错)。
