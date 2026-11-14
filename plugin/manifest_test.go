@@ -18,7 +18,7 @@ func validManifest() *Manifest {
 		Executable: "bin/main",
 		Entrypoint: []string{"run", "--allow-all"},
 		APIVersion: "0.1.0",
-		License: "MIT",
+		License:    "MIT",
 		Maintainer: "team@daedalusys.io",
 		Permissions: &Permissions{
 			Read:  []string{"/home"},
