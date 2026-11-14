@@ -3,13 +3,14 @@
 // Spec: docs/superpowers/specs/2026-10-17-fleet-control-plane-design.md v3.1
 //   (§4.4 wire protocol, §7.3 C3 cert grace 1h, §6 B5 best-effort rollback)
 //
-// Five RPCs:
+// Six RPCs:
 //
 //   Register          — agent上线,响应带 snapshot_capability 字段
 //   Heartbeat         — 保活 + pending intents 通知
 //   ApplyIntent       — 包/文件意图落地
 //   SnapshotRequest   — 控制面要求 agent 立刻 snapshot
 //   ReportStatus      — 审计事件回报(本地 JSONL 哈希链 → 控制面)
+//   RollbackIntent    — package/service 回滚(PLAN → 人审 → APPLY)
 //
 // Transport: gRPC over mTLS, control plane 主动 outbound, agent inbound
 // listen 单端口(spec §4.4). cert 短 TTL 默认 24h, grace 1h(§7.3 C3).
@@ -157,6 +158,9 @@ message ApplyIntentResponse {
   uint64 audit_seq = 3;
   // 失败时的人类可读说明(降级文案, RF3 钉)
   string error_message = 4;
+  // 成功应用后可用于回滚的句柄;空 = 该 kind 无回滚句柄。
+  // 句柄由执行器在 apply 成功后捕获(控制面负责保存),agent 自己不留长期状态。
+  string rollback_handle = 5;
 }
 
 // ============== SnapshotRequest ==============
@@ -198,6 +202,70 @@ message ReportStatusResponse {
   uint64 final_seq = 2;
 }
 
+// ============== RollbackIntent ==============
+
+enum RollbackMode {
+  // PLAN:出计划给人看,不执行任何命令。
+  ROLLBACK_MODE_PLAN = 0;
+  // APPLY:带 plan_hash + approve_token 执行计划。
+  ROLLBACK_MODE_APPLY = 1;
+}
+
+enum RollbackStepKind {
+  ROLLBACK_STEP_KIND_UNSPECIFIED = 0;
+  // 包管理器原生的 undo(dnf history undo / apt history-undo)。
+  ROLLBACK_STEP_KIND_NATIVE_UNDO = 1;
+  // 卸载包(apt-get remove|purge)。
+  ROLLBACK_STEP_KIND_PACKAGE_REMOVE = 2;
+  // 删除文件(永远需要人审)。
+  ROLLBACK_STEP_KIND_FILE_DELETE = 3;
+  // 人工步骤:只给说明,不给命令。
+  ROLLBACK_STEP_KIND_MANUAL = 4;
+}
+
+enum RollbackResult {
+  ROLLBACK_RESULT_UNSPECIFIED = 0;
+  // 计划已生成,token 有效。
+  ROLLBACK_RESULT_PLANNED = 1;
+  // 全部步骤执行成功。
+  ROLLBACK_RESULT_APPLIED = 2;
+  // token 过期/哈希不符/命令不在允许集。
+  ROLLBACK_RESULT_REFUSED = 3;
+  // 执行中某步失败;已执行步骤不自动回退。
+  ROLLBACK_RESULT_FAILED = 4;
+}
+
+message RollbackStep {
+  RollbackStepKind kind = 1;
+  // MANUAL 步为空。
+  string command = 2;
+  // 这一步为什么存在 / 要人看什么。
+  string rationale = 3;
+  bool human_review_required = 4;
+}
+
+message RollbackIntentRequest {
+  // 原 apply 的 intent_id(审计关联)。
+  string intent_id = 1;
+  string rollback_handle = 2;
+  RollbackMode mode = 3;
+  // PLAN 可选(admin 改过的);APPLY 必填且必须与计划一致。
+  repeated RollbackStep steps = 4;
+  string plan_hash = 5;
+  // 仅 PLAN 返回;APPLY 必须带上。
+  string approve_token = 6;
+}
+
+message RollbackIntentResponse {
+  RollbackResult result = 1;
+  repeated RollbackStep steps = 2;
+  string plan_hash = 3;
+  // 仅 PLAN 返回。
+  string approve_token = 4;
+  string error_message = 5;
+  uint64 audit_seq = 6;
+}
+
 // ============== Service ==============
 
 service AgentService {
@@ -211,4 +279,6 @@ service AgentService {
   rpc SnapshotRequest(SnapshotRequestRequest) returns (SnapshotResponse);
   // 审计事件回报;agent 完成本地事务后批量推
   rpc ReportStatus(ReportStatusRequest) returns (ReportStatusResponse);
+  // 回滚通道:PLAN 出计划,APPLY 校验 token 后按步骤执行。
+  rpc RollbackIntent(RollbackIntentRequest) returns (RollbackIntentResponse);
 }
