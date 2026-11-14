@@ -3,13 +3,14 @@
 // Spec: docs/superpowers/specs/2026-10-17-fleet-control-plane-design.md v3.1
 //   (§4.4 wire protocol, §7.3 C3 cert grace 1h, §6 B5 best-effort rollback)
 //
-// Five RPCs:
+// Six RPCs:
 //
 //   Register          — agent上线,响应带 snapshot_capability 字段
 //   Heartbeat         — 保活 + pending intents 通知
 //   ApplyIntent       — 包/文件意图落地
 //   SnapshotRequest   — 控制面要求 agent 立刻 snapshot
 //   ReportStatus      — 审计事件回报(本地 JSONL 哈希链 → 控制面)
+//   RollbackIntent    — package/service 回滚(PLAN → 人审 → APPLY)
 //
 // Transport: gRPC over mTLS, control plane 主动 outbound, agent inbound
 // listen 单端口(spec §4.4). cert 短 TTL 默认 24h, grace 1h(§7.3 C3).
@@ -229,6 +230,172 @@ func (x ApplyIntentResult) Number() protoreflect.EnumNumber {
 // Deprecated: Use ApplyIntentResult.Descriptor instead.
 func (ApplyIntentResult) EnumDescriptor() ([]byte, []int) {
 	return file_agent_v1_agent_proto_rawDescGZIP(), []int{2}
+}
+
+type RollbackMode int32
+
+const (
+	// PLAN:出计划给人看,不执行任何命令。
+	RollbackMode_ROLLBACK_MODE_PLAN RollbackMode = 0
+	// APPLY:带 plan_hash + approve_token 执行计划。
+	RollbackMode_ROLLBACK_MODE_APPLY RollbackMode = 1
+)
+
+// Enum value maps for RollbackMode.
+var (
+	RollbackMode_name = map[int32]string{
+		0: "ROLLBACK_MODE_PLAN",
+		1: "ROLLBACK_MODE_APPLY",
+	}
+	RollbackMode_value = map[string]int32{
+		"ROLLBACK_MODE_PLAN":  0,
+		"ROLLBACK_MODE_APPLY": 1,
+	}
+)
+
+func (x RollbackMode) Enum() *RollbackMode {
+	p := new(RollbackMode)
+	*p = x
+	return p
+}
+
+func (x RollbackMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RollbackMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_v1_agent_proto_enumTypes[3].Descriptor()
+}
+
+func (RollbackMode) Type() protoreflect.EnumType {
+	return &file_agent_v1_agent_proto_enumTypes[3]
+}
+
+func (x RollbackMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RollbackMode.Descriptor instead.
+func (RollbackMode) EnumDescriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{3}
+}
+
+type RollbackStepKind int32
+
+const (
+	RollbackStepKind_ROLLBACK_STEP_KIND_UNSPECIFIED RollbackStepKind = 0
+	// 包管理器原生的 undo(dnf history undo / apt history-undo)。
+	RollbackStepKind_ROLLBACK_STEP_KIND_NATIVE_UNDO RollbackStepKind = 1
+	// 卸载包(apt-get remove|purge)。
+	RollbackStepKind_ROLLBACK_STEP_KIND_PACKAGE_REMOVE RollbackStepKind = 2
+	// 删除文件(永远需要人审)。
+	RollbackStepKind_ROLLBACK_STEP_KIND_FILE_DELETE RollbackStepKind = 3
+	// 人工步骤:只给说明,不给命令。
+	RollbackStepKind_ROLLBACK_STEP_KIND_MANUAL RollbackStepKind = 4
+)
+
+// Enum value maps for RollbackStepKind.
+var (
+	RollbackStepKind_name = map[int32]string{
+		0: "ROLLBACK_STEP_KIND_UNSPECIFIED",
+		1: "ROLLBACK_STEP_KIND_NATIVE_UNDO",
+		2: "ROLLBACK_STEP_KIND_PACKAGE_REMOVE",
+		3: "ROLLBACK_STEP_KIND_FILE_DELETE",
+		4: "ROLLBACK_STEP_KIND_MANUAL",
+	}
+	RollbackStepKind_value = map[string]int32{
+		"ROLLBACK_STEP_KIND_UNSPECIFIED":    0,
+		"ROLLBACK_STEP_KIND_NATIVE_UNDO":    1,
+		"ROLLBACK_STEP_KIND_PACKAGE_REMOVE": 2,
+		"ROLLBACK_STEP_KIND_FILE_DELETE":    3,
+		"ROLLBACK_STEP_KIND_MANUAL":         4,
+	}
+)
+
+func (x RollbackStepKind) Enum() *RollbackStepKind {
+	p := new(RollbackStepKind)
+	*p = x
+	return p
+}
+
+func (x RollbackStepKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RollbackStepKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_v1_agent_proto_enumTypes[4].Descriptor()
+}
+
+func (RollbackStepKind) Type() protoreflect.EnumType {
+	return &file_agent_v1_agent_proto_enumTypes[4]
+}
+
+func (x RollbackStepKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RollbackStepKind.Descriptor instead.
+func (RollbackStepKind) EnumDescriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{4}
+}
+
+type RollbackResult int32
+
+const (
+	RollbackResult_ROLLBACK_RESULT_UNSPECIFIED RollbackResult = 0
+	// 计划已生成,token 有效。
+	RollbackResult_ROLLBACK_RESULT_PLANNED RollbackResult = 1
+	// 全部步骤执行成功。
+	RollbackResult_ROLLBACK_RESULT_APPLIED RollbackResult = 2
+	// token 过期/哈希不符/命令不在允许集。
+	RollbackResult_ROLLBACK_RESULT_REFUSED RollbackResult = 3
+	// 执行中某步失败;已执行步骤不自动回退。
+	RollbackResult_ROLLBACK_RESULT_FAILED RollbackResult = 4
+)
+
+// Enum value maps for RollbackResult.
+var (
+	RollbackResult_name = map[int32]string{
+		0: "ROLLBACK_RESULT_UNSPECIFIED",
+		1: "ROLLBACK_RESULT_PLANNED",
+		2: "ROLLBACK_RESULT_APPLIED",
+		3: "ROLLBACK_RESULT_REFUSED",
+		4: "ROLLBACK_RESULT_FAILED",
+	}
+	RollbackResult_value = map[string]int32{
+		"ROLLBACK_RESULT_UNSPECIFIED": 0,
+		"ROLLBACK_RESULT_PLANNED":     1,
+		"ROLLBACK_RESULT_APPLIED":     2,
+		"ROLLBACK_RESULT_REFUSED":     3,
+		"ROLLBACK_RESULT_FAILED":      4,
+	}
+)
+
+func (x RollbackResult) Enum() *RollbackResult {
+	p := new(RollbackResult)
+	*p = x
+	return p
+}
+
+func (x RollbackResult) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RollbackResult) Descriptor() protoreflect.EnumDescriptor {
+	return file_agent_v1_agent_proto_enumTypes[5].Descriptor()
+}
+
+func (RollbackResult) Type() protoreflect.EnumType {
+	return &file_agent_v1_agent_proto_enumTypes[5]
+}
+
+func (x RollbackResult) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RollbackResult.Descriptor instead.
+func (RollbackResult) EnumDescriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{5}
 }
 
 // Register / Heartbeat 通用:OS 自报(让控制面知道被控环境)。
@@ -689,9 +856,12 @@ type ApplyIntentResponse struct {
 	// 写入本地审计的 seq(无论 result 是什么,失败也记)
 	AuditSeq uint64 `protobuf:"varint,3,opt,name=audit_seq,json=auditSeq,proto3" json:"audit_seq,omitempty"`
 	// 失败时的人类可读说明(降级文案, RF3 钉)
-	ErrorMessage  string `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ErrorMessage string `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	// 成功应用后可用于回滚的句柄;空 = 该 kind 无回滚句柄。
+	// 句柄由执行器在 apply 成功后捕获(控制面负责保存),agent 自己不留长期状态。
+	RollbackHandle string `protobuf:"bytes,5,opt,name=rollback_handle,json=rollbackHandle,proto3" json:"rollback_handle,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ApplyIntentResponse) Reset() {
@@ -748,6 +918,13 @@ func (x *ApplyIntentResponse) GetAuditSeq() uint64 {
 func (x *ApplyIntentResponse) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *ApplyIntentResponse) GetRollbackHandle() string {
+	if x != nil {
+		return x.RollbackHandle
 	}
 	return ""
 }
@@ -1050,6 +1227,248 @@ func (x *ReportStatusResponse) GetFinalSeq() uint64 {
 	return 0
 }
 
+type RollbackStep struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  RollbackStepKind       `protobuf:"varint,1,opt,name=kind,proto3,enum=daedalus.agent.v1.RollbackStepKind" json:"kind,omitempty"`
+	// MANUAL 步为空。
+	Command string `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	// 这一步为什么存在 / 要人看什么。
+	Rationale           string `protobuf:"bytes,3,opt,name=rationale,proto3" json:"rationale,omitempty"`
+	HumanReviewRequired bool   `protobuf:"varint,4,opt,name=human_review_required,json=humanReviewRequired,proto3" json:"human_review_required,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *RollbackStep) Reset() {
+	*x = RollbackStep{}
+	mi := &file_agent_v1_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollbackStep) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollbackStep) ProtoMessage() {}
+
+func (x *RollbackStep) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollbackStep.ProtoReflect.Descriptor instead.
+func (*RollbackStep) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *RollbackStep) GetKind() RollbackStepKind {
+	if x != nil {
+		return x.Kind
+	}
+	return RollbackStepKind_ROLLBACK_STEP_KIND_UNSPECIFIED
+}
+
+func (x *RollbackStep) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *RollbackStep) GetRationale() string {
+	if x != nil {
+		return x.Rationale
+	}
+	return ""
+}
+
+func (x *RollbackStep) GetHumanReviewRequired() bool {
+	if x != nil {
+		return x.HumanReviewRequired
+	}
+	return false
+}
+
+type RollbackIntentRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 原 apply 的 intent_id(审计关联)。
+	IntentId       string       `protobuf:"bytes,1,opt,name=intent_id,json=intentId,proto3" json:"intent_id,omitempty"`
+	RollbackHandle string       `protobuf:"bytes,2,opt,name=rollback_handle,json=rollbackHandle,proto3" json:"rollback_handle,omitempty"`
+	Mode           RollbackMode `protobuf:"varint,3,opt,name=mode,proto3,enum=daedalus.agent.v1.RollbackMode" json:"mode,omitempty"`
+	// PLAN 可选(admin 改过的);APPLY 必填且必须与计划一致。
+	Steps    []*RollbackStep `protobuf:"bytes,4,rep,name=steps,proto3" json:"steps,omitempty"`
+	PlanHash string          `protobuf:"bytes,5,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	// 仅 PLAN 返回;APPLY 必须带上。
+	ApproveToken  string `protobuf:"bytes,6,opt,name=approve_token,json=approveToken,proto3" json:"approve_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollbackIntentRequest) Reset() {
+	*x = RollbackIntentRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollbackIntentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollbackIntentRequest) ProtoMessage() {}
+
+func (x *RollbackIntentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollbackIntentRequest.ProtoReflect.Descriptor instead.
+func (*RollbackIntentRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *RollbackIntentRequest) GetIntentId() string {
+	if x != nil {
+		return x.IntentId
+	}
+	return ""
+}
+
+func (x *RollbackIntentRequest) GetRollbackHandle() string {
+	if x != nil {
+		return x.RollbackHandle
+	}
+	return ""
+}
+
+func (x *RollbackIntentRequest) GetMode() RollbackMode {
+	if x != nil {
+		return x.Mode
+	}
+	return RollbackMode_ROLLBACK_MODE_PLAN
+}
+
+func (x *RollbackIntentRequest) GetSteps() []*RollbackStep {
+	if x != nil {
+		return x.Steps
+	}
+	return nil
+}
+
+func (x *RollbackIntentRequest) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
+func (x *RollbackIntentRequest) GetApproveToken() string {
+	if x != nil {
+		return x.ApproveToken
+	}
+	return ""
+}
+
+type RollbackIntentResponse struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Result   RollbackResult         `protobuf:"varint,1,opt,name=result,proto3,enum=daedalus.agent.v1.RollbackResult" json:"result,omitempty"`
+	Steps    []*RollbackStep        `protobuf:"bytes,2,rep,name=steps,proto3" json:"steps,omitempty"`
+	PlanHash string                 `protobuf:"bytes,3,opt,name=plan_hash,json=planHash,proto3" json:"plan_hash,omitempty"`
+	// 仅 PLAN 返回。
+	ApproveToken  string `protobuf:"bytes,4,opt,name=approve_token,json=approveToken,proto3" json:"approve_token,omitempty"`
+	ErrorMessage  string `protobuf:"bytes,5,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	AuditSeq      uint64 `protobuf:"varint,6,opt,name=audit_seq,json=auditSeq,proto3" json:"audit_seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollbackIntentResponse) Reset() {
+	*x = RollbackIntentResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollbackIntentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollbackIntentResponse) ProtoMessage() {}
+
+func (x *RollbackIntentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollbackIntentResponse.ProtoReflect.Descriptor instead.
+func (*RollbackIntentResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RollbackIntentResponse) GetResult() RollbackResult {
+	if x != nil {
+		return x.Result
+	}
+	return RollbackResult_ROLLBACK_RESULT_UNSPECIFIED
+}
+
+func (x *RollbackIntentResponse) GetSteps() []*RollbackStep {
+	if x != nil {
+		return x.Steps
+	}
+	return nil
+}
+
+func (x *RollbackIntentResponse) GetPlanHash() string {
+	if x != nil {
+		return x.PlanHash
+	}
+	return ""
+}
+
+func (x *RollbackIntentResponse) GetApproveToken() string {
+	if x != nil {
+		return x.ApproveToken
+	}
+	return ""
+}
+
+func (x *RollbackIntentResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *RollbackIntentResponse) GetAuditSeq() uint64 {
+	if x != nil {
+		return x.AuditSeq
+	}
+	return 0
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -1088,12 +1507,13 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x06target\x18\x03 \x01(\tR\x06target\x12\x1b\n" +
 	"\tspec_json\x18\x04 \x01(\tR\bspecJson\x12;\n" +
 	"\n" +
-	"risk_class\x18\x05 \x01(\x0e2\x1c.daedalus.agent.v1.RiskClassR\triskClass\"\xaa\x01\n" +
+	"risk_class\x18\x05 \x01(\x0e2\x1c.daedalus.agent.v1.RiskClassR\triskClass\"\xd3\x01\n" +
 	"\x13ApplyIntentResponse\x12<\n" +
 	"\x06result\x18\x01 \x01(\x0e2$.daedalus.agent.v1.ApplyIntentResultR\x06result\x12\x13\n" +
 	"\x05tx_id\x18\x02 \x01(\tR\x04txId\x12\x1b\n" +
 	"\taudit_seq\x18\x03 \x01(\x04R\bauditSeq\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"0\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12'\n" +
+	"\x0frollback_handle\x18\x05 \x01(\tR\x0erollbackHandle\"0\n" +
 	"\x16SnapshotRequestRequest\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\xa5\x01\n" +
 	"\x10SnapshotResponse\x12\x1f\n" +
@@ -1116,7 +1536,26 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"max_events\x18\x02 \x01(\rR\tmaxEvents\"j\n" +
 	"\x14ReportStatusResponse\x125\n" +
 	"\x06events\x18\x01 \x03(\v2\x1d.daedalus.agent.v1.AuditEventR\x06events\x12\x1b\n" +
-	"\tfinal_seq\x18\x02 \x01(\x04R\bfinalSeq*\xf2\x01\n" +
+	"\tfinal_seq\x18\x02 \x01(\x04R\bfinalSeq\"\xb3\x01\n" +
+	"\fRollbackStep\x127\n" +
+	"\x04kind\x18\x01 \x01(\x0e2#.daedalus.agent.v1.RollbackStepKindR\x04kind\x12\x18\n" +
+	"\acommand\x18\x02 \x01(\tR\acommand\x12\x1c\n" +
+	"\trationale\x18\x03 \x01(\tR\trationale\x122\n" +
+	"\x15human_review_required\x18\x04 \x01(\bR\x13humanReviewRequired\"\x8b\x02\n" +
+	"\x15RollbackIntentRequest\x12\x1b\n" +
+	"\tintent_id\x18\x01 \x01(\tR\bintentId\x12'\n" +
+	"\x0frollback_handle\x18\x02 \x01(\tR\x0erollbackHandle\x123\n" +
+	"\x04mode\x18\x03 \x01(\x0e2\x1f.daedalus.agent.v1.RollbackModeR\x04mode\x125\n" +
+	"\x05steps\x18\x04 \x03(\v2\x1f.daedalus.agent.v1.RollbackStepR\x05steps\x12\x1b\n" +
+	"\tplan_hash\x18\x05 \x01(\tR\bplanHash\x12#\n" +
+	"\rapprove_token\x18\x06 \x01(\tR\fapproveToken\"\x8e\x02\n" +
+	"\x16RollbackIntentResponse\x129\n" +
+	"\x06result\x18\x01 \x01(\x0e2!.daedalus.agent.v1.RollbackResultR\x06result\x125\n" +
+	"\x05steps\x18\x02 \x03(\v2\x1f.daedalus.agent.v1.RollbackStepR\x05steps\x12\x1b\n" +
+	"\tplan_hash\x18\x03 \x01(\tR\bplanHash\x12#\n" +
+	"\rapprove_token\x18\x04 \x01(\tR\fapproveToken\x12#\n" +
+	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\x12\x1b\n" +
+	"\taudit_seq\x18\x06 \x01(\x04R\bauditSeq*\xf2\x01\n" +
 	"\x12SnapshotCapability\x12#\n" +
 	"\x1fSNAPSHOT_CAPABILITY_UNSPECIFIED\x10\x00\x12'\n" +
 	"#SNAPSHOT_CAPABILITY_BTRFS_SUBVOLUME\x10\x01\x12 \n" +
@@ -1134,13 +1573,29 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"4APPLY_INTENT_RESULT_REFUSED_SNAPSHOT_CAPABILITY_NONE\x10\x02\x12&\n" +
 	"\"APPLY_INTENT_RESULT_REFUSED_POLICY\x10\x03\x12)\n" +
 	"%APPLY_INTENT_RESULT_TRANSIENT_FAILURE\x10\x04\x12*\n" +
-	"&APPLY_INTENT_RESULT_PERSISTENT_FAILURE\x10\x052\xdd\x03\n" +
+	"&APPLY_INTENT_RESULT_PERSISTENT_FAILURE\x10\x05*?\n" +
+	"\fRollbackMode\x12\x16\n" +
+	"\x12ROLLBACK_MODE_PLAN\x10\x00\x12\x17\n" +
+	"\x13ROLLBACK_MODE_APPLY\x10\x01*\xc4\x01\n" +
+	"\x10RollbackStepKind\x12\"\n" +
+	"\x1eROLLBACK_STEP_KIND_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eROLLBACK_STEP_KIND_NATIVE_UNDO\x10\x01\x12%\n" +
+	"!ROLLBACK_STEP_KIND_PACKAGE_REMOVE\x10\x02\x12\"\n" +
+	"\x1eROLLBACK_STEP_KIND_FILE_DELETE\x10\x03\x12\x1d\n" +
+	"\x19ROLLBACK_STEP_KIND_MANUAL\x10\x04*\xa4\x01\n" +
+	"\x0eRollbackResult\x12\x1f\n" +
+	"\x1bROLLBACK_RESULT_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17ROLLBACK_RESULT_PLANNED\x10\x01\x12\x1b\n" +
+	"\x17ROLLBACK_RESULT_APPLIED\x10\x02\x12\x1b\n" +
+	"\x17ROLLBACK_RESULT_REFUSED\x10\x03\x12\x1a\n" +
+	"\x16ROLLBACK_RESULT_FAILED\x10\x042\xc4\x04\n" +
 	"\fAgentService\x12S\n" +
 	"\bRegister\x12\".daedalus.agent.v1.RegisterRequest\x1a#.daedalus.agent.v1.RegisterResponse\x12V\n" +
 	"\tHeartbeat\x12#.daedalus.agent.v1.HeartbeatRequest\x1a$.daedalus.agent.v1.HeartbeatResponse\x12\\\n" +
 	"\vApplyIntent\x12%.daedalus.agent.v1.ApplyIntentRequest\x1a&.daedalus.agent.v1.ApplyIntentResponse\x12a\n" +
 	"\x0fSnapshotRequest\x12).daedalus.agent.v1.SnapshotRequestRequest\x1a#.daedalus.agent.v1.SnapshotResponse\x12_\n" +
-	"\fReportStatus\x12&.daedalus.agent.v1.ReportStatusRequest\x1a'.daedalus.agent.v1.ReportStatusResponseB;Z9github.com/Daedalusys/daedalus-sdk/proto/agent/v1;agentv1b\x06proto3"
+	"\fReportStatus\x12&.daedalus.agent.v1.ReportStatusRequest\x1a'.daedalus.agent.v1.ReportStatusResponse\x12e\n" +
+	"\x0eRollbackIntent\x12(.daedalus.agent.v1.RollbackIntentRequest\x1a).daedalus.agent.v1.RollbackIntentResponseB;Z9github.com/Daedalusys/daedalus-sdk/proto/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -1154,47 +1609,60 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_agent_v1_agent_proto_rawDescData
 }
 
-var file_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agent_v1_agent_proto_goTypes = []any{
 	(SnapshotCapability)(0),        // 0: daedalus.agent.v1.SnapshotCapability
 	(RiskClass)(0),                 // 1: daedalus.agent.v1.RiskClass
 	(ApplyIntentResult)(0),         // 2: daedalus.agent.v1.ApplyIntentResult
-	(*OsInfo)(nil),                 // 3: daedalus.agent.v1.OsInfo
-	(*RegisterRequest)(nil),        // 4: daedalus.agent.v1.RegisterRequest
-	(*RegisterResponse)(nil),       // 5: daedalus.agent.v1.RegisterResponse
-	(*HeartbeatRequest)(nil),       // 6: daedalus.agent.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil),      // 7: daedalus.agent.v1.HeartbeatResponse
-	(*ApplyIntentRequest)(nil),     // 8: daedalus.agent.v1.ApplyIntentRequest
-	(*ApplyIntentResponse)(nil),    // 9: daedalus.agent.v1.ApplyIntentResponse
-	(*SnapshotRequestRequest)(nil), // 10: daedalus.agent.v1.SnapshotRequestRequest
-	(*SnapshotResponse)(nil),       // 11: daedalus.agent.v1.SnapshotResponse
-	(*AuditEvent)(nil),             // 12: daedalus.agent.v1.AuditEvent
-	(*ReportStatusRequest)(nil),    // 13: daedalus.agent.v1.ReportStatusRequest
-	(*ReportStatusResponse)(nil),   // 14: daedalus.agent.v1.ReportStatusResponse
+	(RollbackMode)(0),              // 3: daedalus.agent.v1.RollbackMode
+	(RollbackStepKind)(0),          // 4: daedalus.agent.v1.RollbackStepKind
+	(RollbackResult)(0),            // 5: daedalus.agent.v1.RollbackResult
+	(*OsInfo)(nil),                 // 6: daedalus.agent.v1.OsInfo
+	(*RegisterRequest)(nil),        // 7: daedalus.agent.v1.RegisterRequest
+	(*RegisterResponse)(nil),       // 8: daedalus.agent.v1.RegisterResponse
+	(*HeartbeatRequest)(nil),       // 9: daedalus.agent.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),      // 10: daedalus.agent.v1.HeartbeatResponse
+	(*ApplyIntentRequest)(nil),     // 11: daedalus.agent.v1.ApplyIntentRequest
+	(*ApplyIntentResponse)(nil),    // 12: daedalus.agent.v1.ApplyIntentResponse
+	(*SnapshotRequestRequest)(nil), // 13: daedalus.agent.v1.SnapshotRequestRequest
+	(*SnapshotResponse)(nil),       // 14: daedalus.agent.v1.SnapshotResponse
+	(*AuditEvent)(nil),             // 15: daedalus.agent.v1.AuditEvent
+	(*ReportStatusRequest)(nil),    // 16: daedalus.agent.v1.ReportStatusRequest
+	(*ReportStatusResponse)(nil),   // 17: daedalus.agent.v1.ReportStatusResponse
+	(*RollbackStep)(nil),           // 18: daedalus.agent.v1.RollbackStep
+	(*RollbackIntentRequest)(nil),  // 19: daedalus.agent.v1.RollbackIntentRequest
+	(*RollbackIntentResponse)(nil), // 20: daedalus.agent.v1.RollbackIntentResponse
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
-	3,  // 0: daedalus.agent.v1.RegisterRequest.os_info:type_name -> daedalus.agent.v1.OsInfo
+	6,  // 0: daedalus.agent.v1.RegisterRequest.os_info:type_name -> daedalus.agent.v1.OsInfo
 	0,  // 1: daedalus.agent.v1.RegisterResponse.snapshot_capability:type_name -> daedalus.agent.v1.SnapshotCapability
 	1,  // 2: daedalus.agent.v1.ApplyIntentRequest.risk_class:type_name -> daedalus.agent.v1.RiskClass
 	2,  // 3: daedalus.agent.v1.ApplyIntentResponse.result:type_name -> daedalus.agent.v1.ApplyIntentResult
 	0,  // 4: daedalus.agent.v1.SnapshotResponse.backend_used:type_name -> daedalus.agent.v1.SnapshotCapability
-	12, // 5: daedalus.agent.v1.ReportStatusResponse.events:type_name -> daedalus.agent.v1.AuditEvent
-	4,  // 6: daedalus.agent.v1.AgentService.Register:input_type -> daedalus.agent.v1.RegisterRequest
-	6,  // 7: daedalus.agent.v1.AgentService.Heartbeat:input_type -> daedalus.agent.v1.HeartbeatRequest
-	8,  // 8: daedalus.agent.v1.AgentService.ApplyIntent:input_type -> daedalus.agent.v1.ApplyIntentRequest
-	10, // 9: daedalus.agent.v1.AgentService.SnapshotRequest:input_type -> daedalus.agent.v1.SnapshotRequestRequest
-	13, // 10: daedalus.agent.v1.AgentService.ReportStatus:input_type -> daedalus.agent.v1.ReportStatusRequest
-	5,  // 11: daedalus.agent.v1.AgentService.Register:output_type -> daedalus.agent.v1.RegisterResponse
-	7,  // 12: daedalus.agent.v1.AgentService.Heartbeat:output_type -> daedalus.agent.v1.HeartbeatResponse
-	9,  // 13: daedalus.agent.v1.AgentService.ApplyIntent:output_type -> daedalus.agent.v1.ApplyIntentResponse
-	11, // 14: daedalus.agent.v1.AgentService.SnapshotRequest:output_type -> daedalus.agent.v1.SnapshotResponse
-	14, // 15: daedalus.agent.v1.AgentService.ReportStatus:output_type -> daedalus.agent.v1.ReportStatusResponse
-	11, // [11:16] is the sub-list for method output_type
-	6,  // [6:11] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	15, // 5: daedalus.agent.v1.ReportStatusResponse.events:type_name -> daedalus.agent.v1.AuditEvent
+	4,  // 6: daedalus.agent.v1.RollbackStep.kind:type_name -> daedalus.agent.v1.RollbackStepKind
+	3,  // 7: daedalus.agent.v1.RollbackIntentRequest.mode:type_name -> daedalus.agent.v1.RollbackMode
+	18, // 8: daedalus.agent.v1.RollbackIntentRequest.steps:type_name -> daedalus.agent.v1.RollbackStep
+	5,  // 9: daedalus.agent.v1.RollbackIntentResponse.result:type_name -> daedalus.agent.v1.RollbackResult
+	18, // 10: daedalus.agent.v1.RollbackIntentResponse.steps:type_name -> daedalus.agent.v1.RollbackStep
+	7,  // 11: daedalus.agent.v1.AgentService.Register:input_type -> daedalus.agent.v1.RegisterRequest
+	9,  // 12: daedalus.agent.v1.AgentService.Heartbeat:input_type -> daedalus.agent.v1.HeartbeatRequest
+	11, // 13: daedalus.agent.v1.AgentService.ApplyIntent:input_type -> daedalus.agent.v1.ApplyIntentRequest
+	13, // 14: daedalus.agent.v1.AgentService.SnapshotRequest:input_type -> daedalus.agent.v1.SnapshotRequestRequest
+	16, // 15: daedalus.agent.v1.AgentService.ReportStatus:input_type -> daedalus.agent.v1.ReportStatusRequest
+	19, // 16: daedalus.agent.v1.AgentService.RollbackIntent:input_type -> daedalus.agent.v1.RollbackIntentRequest
+	8,  // 17: daedalus.agent.v1.AgentService.Register:output_type -> daedalus.agent.v1.RegisterResponse
+	10, // 18: daedalus.agent.v1.AgentService.Heartbeat:output_type -> daedalus.agent.v1.HeartbeatResponse
+	12, // 19: daedalus.agent.v1.AgentService.ApplyIntent:output_type -> daedalus.agent.v1.ApplyIntentResponse
+	14, // 20: daedalus.agent.v1.AgentService.SnapshotRequest:output_type -> daedalus.agent.v1.SnapshotResponse
+	17, // 21: daedalus.agent.v1.AgentService.ReportStatus:output_type -> daedalus.agent.v1.ReportStatusResponse
+	20, // 22: daedalus.agent.v1.AgentService.RollbackIntent:output_type -> daedalus.agent.v1.RollbackIntentResponse
+	17, // [17:23] is the sub-list for method output_type
+	11, // [11:17] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agent_v1_agent_proto_init() }
@@ -1207,8 +1675,8 @@ func file_agent_v1_agent_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   12,
+			NumEnums:      6,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

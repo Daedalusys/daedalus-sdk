@@ -3,13 +3,14 @@
 // Spec: docs/superpowers/specs/2026-10-17-fleet-control-plane-design.md v3.1
 //   (§4.4 wire protocol, §7.3 C3 cert grace 1h, §6 B5 best-effort rollback)
 //
-// Five RPCs:
+// Six RPCs:
 //
 //   Register          — agent上线,响应带 snapshot_capability 字段
 //   Heartbeat         — 保活 + pending intents 通知
 //   ApplyIntent       — 包/文件意图落地
 //   SnapshotRequest   — 控制面要求 agent 立刻 snapshot
 //   ReportStatus      — 审计事件回报(本地 JSONL 哈希链 → 控制面)
+//   RollbackIntent    — package/service 回滚(PLAN → 人审 → APPLY)
 //
 // Transport: gRPC over mTLS, control plane 主动 outbound, agent inbound
 // listen 单端口(spec §4.4). cert 短 TTL 默认 24h, grace 1h(§7.3 C3).
@@ -48,6 +49,7 @@ const (
 	AgentService_ApplyIntent_FullMethodName     = "/daedalus.agent.v1.AgentService/ApplyIntent"
 	AgentService_SnapshotRequest_FullMethodName = "/daedalus.agent.v1.AgentService/SnapshotRequest"
 	AgentService_ReportStatus_FullMethodName    = "/daedalus.agent.v1.AgentService/ReportStatus"
+	AgentService_RollbackIntent_FullMethodName  = "/daedalus.agent.v1.AgentService/RollbackIntent"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -64,6 +66,8 @@ type AgentServiceClient interface {
 	SnapshotRequest(ctx context.Context, in *SnapshotRequestRequest, opts ...grpc.CallOption) (*SnapshotResponse, error)
 	// 审计事件回报;agent 完成本地事务后批量推
 	ReportStatus(ctx context.Context, in *ReportStatusRequest, opts ...grpc.CallOption) (*ReportStatusResponse, error)
+	// 回滚通道:PLAN 出计划,APPLY 校验 token 后按步骤执行。
+	RollbackIntent(ctx context.Context, in *RollbackIntentRequest, opts ...grpc.CallOption) (*RollbackIntentResponse, error)
 }
 
 type agentServiceClient struct {
@@ -124,6 +128,16 @@ func (c *agentServiceClient) ReportStatus(ctx context.Context, in *ReportStatusR
 	return out, nil
 }
 
+func (c *agentServiceClient) RollbackIntent(ctx context.Context, in *RollbackIntentRequest, opts ...grpc.CallOption) (*RollbackIntentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RollbackIntentResponse)
+	err := c.cc.Invoke(ctx, AgentService_RollbackIntent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -138,6 +152,8 @@ type AgentServiceServer interface {
 	SnapshotRequest(context.Context, *SnapshotRequestRequest) (*SnapshotResponse, error)
 	// 审计事件回报;agent 完成本地事务后批量推
 	ReportStatus(context.Context, *ReportStatusRequest) (*ReportStatusResponse, error)
+	// 回滚通道:PLAN 出计划,APPLY 校验 token 后按步骤执行。
+	RollbackIntent(context.Context, *RollbackIntentRequest) (*RollbackIntentResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -162,6 +178,9 @@ func (UnimplementedAgentServiceServer) SnapshotRequest(context.Context, *Snapsho
 }
 func (UnimplementedAgentServiceServer) ReportStatus(context.Context, *ReportStatusRequest) (*ReportStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportStatus not implemented")
+}
+func (UnimplementedAgentServiceServer) RollbackIntent(context.Context, *RollbackIntentRequest) (*RollbackIntentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RollbackIntent not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -274,6 +293,24 @@ func _AgentService_ReportStatus_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_RollbackIntent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RollbackIntentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).RollbackIntent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_RollbackIntent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).RollbackIntent(ctx, req.(*RollbackIntentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -300,6 +337,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReportStatus",
 			Handler:    _AgentService_ReportStatus_Handler,
+		},
+		{
+			MethodName: "RollbackIntent",
+			Handler:    _AgentService_RollbackIntent_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
