@@ -158,15 +158,14 @@ func TestRegistry_MustLoad_Happy(t *testing.T) {
 
 // TestRegistry_Load_RealBlueprints 用真实蓝图数据做集成测试。
 //
-// 相对路径 ../../../plugin/blueprint/blueprints 从本包目录
-// (daedalus/core/internal/blueprint,go test 的 cwd 即包目录)上溯到
-// daedalus/plugin/blueprint/blueprints。若相对路径在某个执行环境下不稳
-// (文件不存在),Skip 而非失败——真实嵌入数据的加载验证归属
-// //go:embed + TestRegistry_LoadEmbedded。
+// 相对路径 ../../daedalus-plugins/blueprint/blueprints 从本包目录
+// (daedalus-sdk/blueprint,go test 的 cwd 即包目录)上溯到平级插件仓里的
+// 真实蓝图目录。SDK 单仓 clone 里该目录不存在(蓝图数据与 //go:embed 都在
+// daedalus-plugins/blueprint/cmd/daedalus-blueprint),此时 Skip 而非失败。
 func TestRegistry_Load_RealBlueprints(t *testing.T) {
-	const dir = "../../../plugin/blueprint/blueprints"
+	const dir = "../../daedalus-plugins/blueprint/blueprints"
 	if _, err := os.Stat(dir); err != nil {
-		t.Skipf("真实蓝图目录 %s 不可达(%v);嵌入数据加载验证归 TestRegistry_LoadEmbedded", dir, err)
+		t.Skipf("真实蓝图目录 %s 不可达(%v);SDK 单仓 clone 属预期,蓝图数据归 daedalus-plugins/blueprint", dir, err)
 	}
 	bs, err := Load(os.DirFS(dir))
 	if err != nil {
