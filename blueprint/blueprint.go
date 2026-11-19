@@ -41,30 +41,6 @@ type BlueprintManifest struct {
 	RequiredTools  []string `json:"required_tools"`
 }
 
-// ParamSchema 是 schema.json 的反序列化形态。
-//
-// 惰性校验设计:仅持有原始 JSON 字节,不在此处解析。render 路径才用
-// jsonschema-go 编译校验参数,避免每个蓝图加载即编译。
-type ParamSchema struct {
-	Raw []byte
-}
-
-type RenderResult struct {
-	PlanID          string
-	RenderedContent string
-	Diff            string
-	Warnings        []string
-	TargetPath      string
-}
-
-type ApplyResult struct {
-	TxID        string
-	AppliedAt   string
-	ConfigPath  string
-	PostCheckOK bool
-	ReloadOK    bool
-}
-
 // ConfirmToken 是 confirm_token 契约的类型(定义见 confirm_token.go 类型别名,
 // 实际承载在 confirmation 包)。
 //
