@@ -124,6 +124,111 @@ func TestNonSystemdPatternRequiresAction(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsDuplicateSigner 钉住同名签发者只允许一条:
+// 「首条即胜」会让后来加的收紧条目静默失效(配置更严、行为更松)。
+func TestLoadRejectsDuplicateSigner(t *testing.T) {
+	path := writeTemp(t, "autonomy.toml", `
+[[signer]]
+user = "alice"
+max_scope = ["systemd:user:restart:*"]
+max_ttl = "1h"
+max_uses = 5
+
+[[signer]]
+user = "alice"
+max_scope = ["systemd:user:restart:nginx.service"]
+max_ttl = "10m"
+max_uses = 1
+`)
+	cfg, err := autonomy.Load(path)
+	if err == nil {
+		t.Fatalf("同名签发者竟然加载成功: %+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "重复") || !strings.Contains(err.Error(), "第 2 个") {
+		t.Fatalf("错误信息应指到重复的那一条 signer: %v", err)
+	}
+}
+
+// TestLoadRejectsZeroSignerBounds 钉住上限必须显式写正数:
+// 若「缺省/0 = 不限制」,少写一个字段就变成了放宽权限。
+func TestLoadRejectsZeroSignerBounds(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"缺 max_ttl", `
+[[signer]]
+user = "alice"
+max_scope = ["systemd:user:restart:*"]
+max_uses = 2
+`, "max_ttl"},
+		{"max_ttl 为 0s", `
+[[signer]]
+user = "alice"
+max_scope = ["systemd:user:restart:*"]
+max_ttl = "0s"
+max_uses = 2
+`, "max_ttl"},
+		{"缺 max_uses", `
+[[signer]]
+user = "alice"
+max_scope = ["systemd:user:restart:*"]
+max_ttl = "1h"
+`, "max_uses"},
+		{"max_uses 为 0", `
+[[signer]]
+user = "alice"
+max_scope = ["systemd:user:restart:*"]
+max_ttl = "1h"
+max_uses = 0
+`, "max_uses"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTemp(t, "autonomy.toml", tc.content)
+			cfg, err := autonomy.Load(path)
+			if err == nil {
+				t.Fatalf("上限缺失/为 0 竟然加载成功: %+v", cfg)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("错误信息应点明 %s: %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestLoadRejectsLaxMaxScope 钉住 max_scope 与消费侧用同一套严格语法:
+// 省略动作段(= 缺目标段)的宽松形态要在加载期就拒,否则会变成
+// 「配置合法、签发永远失败」的静默死配置。
+func TestLoadRejectsLaxMaxScope(t *testing.T) {
+	bad := writeTemp(t, "bad.toml", `
+[[signer]]
+user = "alice"
+max_scope = ["systemd:user:restart"]
+max_ttl = "1h"
+max_uses = 2
+`)
+	cfg, err := autonomy.Load(bad)
+	if err == nil {
+		t.Fatalf("缺目标段的宽松 max_scope 竟然加载成功: %+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "max_scope") {
+		t.Fatalf("错误信息应点明 max_scope: %v", err)
+	}
+
+	good := writeTemp(t, "good.toml", `
+[[signer]]
+user = "alice"
+max_scope = ["systemd:user:restart:*"]
+max_ttl = "1h"
+max_uses = 2
+`)
+	if _, err := autonomy.Load(good); err != nil {
+		t.Fatalf("严格形态的 max_scope 应加载通过: %v", err)
+	}
+}
+
 // TestLoadMissingReturnsErrNotFound 钉住哨兵:缺失由调用方决定回退。
 func TestLoadMissingReturnsErrNotFound(t *testing.T) {
 	_, err := autonomy.Load(filepath.Join(t.TempDir(), "absent.toml"))

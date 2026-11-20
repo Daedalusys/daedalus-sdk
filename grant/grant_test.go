@@ -155,10 +155,15 @@ func TestParseGrantRejects(t *testing.T) {
 }
 
 func TestParseGrantRejectsBrokenJSON(t *testing.T) {
+	const valid = `{"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_at":"2026-11-20T10:00:00Z","expires_at":"2026-11-20T12:00:00Z","max_uses":1}`
 	cases := map[string][]byte{
-		"非 JSON":      []byte("not json"),
-		"JSON 语法错":    []byte(`{"id":"g-1",`),
-		"对象后有残余":      []byte(`{"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_at":"2026-11-20T10:00:00Z","expires_at":"2026-11-20T12:00:00Z","max_uses":1} {}`),
+		"非 JSON":   []byte("not json"),
+		"JSON 语法错": []byte(`{"id":"g-1",`),
+		"对象后有残余":   []byte(valid + ` {}`),
+		// 紧跟的 ] / } 是 dec.More() 的盲区:这三种尾串都必须被拒。
+		"对象后残余 ]":     []byte(valid + `]`),
+		"对象后残余 }":     []byte(valid + `}`),
+		"对象后残余 空格}":   []byte(valid + ` }`),
 		"JSON 数组而非对象": []byte(`[]`),
 	}
 	for name, data := range cases {
@@ -361,7 +366,9 @@ func TestDenySignerWins(t *testing.T) {
 	cfg := aliceConfig()
 	cfg.DenySigners = []string{"alice"}
 	err := grant.Authorize(cfg, baseGrant(now), 1000, "alice", now)
-	assertErrContains(t, err, "无权")
+	// 断言到「禁用签发者」这一具体原因:与「不在名单」共用「无权」时,
+	// 交换两处文案或合并成一句都不会变红。
+	assertErrContains(t, err, "无权", "禁用签发者")
 }
 
 func TestDenySignerWinsOverWildcardGrant(t *testing.T) {
@@ -371,7 +378,7 @@ func TestDenySignerWinsOverWildcardGrant(t *testing.T) {
 	g := baseGrant(now)
 	g.Scope = []string{"systemd:user:restart:*"}
 	err := grant.Authorize(cfg, g, 1000, "alice", now)
-	assertErrContains(t, err, "无权")
+	assertErrContains(t, err, "无权", "禁用签发者")
 }
 
 func TestAuthorizeRootBypassesSignerList(t *testing.T) {
@@ -429,7 +436,9 @@ func TestAuthorizeRejectsExpiredGrant(t *testing.T) {
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	g := baseGrant(now)
 	g.ExpiresAt = now.Add(-time.Minute)
-	assertErrContains(t, grant.Authorize(aliceConfig(), g, 1000, "alice", now), "有效期")
+	// 「已过期」与「有效期超过上限」是两回事:下游要能区分「续签一张过期的」
+	// 与「把 TTL 写短点」,所以文案必须不同。
+	assertErrContains(t, grant.Authorize(aliceConfig(), g, 1000, "alice", now), "已过期")
 }
 
 func TestAuthorizeRejectsBrokenScope(t *testing.T) {
@@ -453,24 +462,69 @@ func TestAuthorizeRejectsZeroUses(t *testing.T) {
 	assertErrContains(t, grant.Authorize(aliceConfig(), g, 1000, "alice", now), "次数")
 }
 
-func TestAuthorizeUnsetSignerLimitsFallBackToGlobalCaps(t *testing.T) {
-	// max_ttl / max_uses 未写(0)= 不额外限制,只受全局硬上限(24h / 10 次)约束。
+func TestAuthorizeRejectsZeroSignerBounds(t *testing.T) {
+	// 上限 0 只能来自程序内构造的配置(加载期已要求必填):必须 fail-closed 拒,
+	// 绝不能当成"不额外限制"。否则「少写一个字段 ⇒ 权限变大」。
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	scope := []string{"systemd:user:restart:*"}
+	cases := []struct {
+		name   string
+		signer autonomy.Signer
+		want   string
+	}{
+		{"缺 max_ttl", autonomy.Signer{User: "alice", MaxScope: scope, MaxUses: 2}, "max_ttl"},
+		{"缺 max_uses", autonomy.Signer{User: "alice", MaxScope: scope, MaxTTL: time.Hour}, "max_uses"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &autonomy.Config{Signers: []autonomy.Signer{tc.signer}}
+			assertErrContains(t, grant.Authorize(cfg, baseGrant(now), 1000, "alice", now), tc.want)
+		})
+	}
+
+	// 也不得退回全局硬上限:零上限签发者签 20h / 10 次同样要拒。
+	cfg := &autonomy.Config{Signers: []autonomy.Signer{{User: "alice", MaxScope: scope}}}
+	g := baseGrant(now)
+	g.ExpiresAt = now.Add(20 * time.Hour)
+	g.MaxUses = 10
+	assertErrContains(t, grant.Authorize(cfg, g, 1000, "alice", now), "max_ttl")
+}
+
+func TestAuthorizeRejectsDuplicateSigner(t *testing.T) {
+	// 手工构造的 Config 可能绕过加载期去重:消费侧自己也要拒多条。
+	// 挑首条会让「后加的收紧条目」静默失效(配置更严、行为更松)。
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	cfg := &autonomy.Config{Signers: []autonomy.Signer{
+		// 宽在前:按首条会放行这张 30 分钟 / 1 次的条子。
+		{User: "alice", MaxScope: []string{"systemd:user:restart:*"}, MaxTTL: time.Hour, MaxUses: 5},
+		// 严在后:10 分钟 / 1 次。
+		{User: "alice", MaxScope: []string{"systemd:user:restart:nginx.service"}, MaxTTL: 10 * time.Minute, MaxUses: 1},
+	}}
+	err := grant.Authorize(cfg, baseGrant(now), 1000, "alice", now)
+	assertErrContains(t, err, "重复")
+}
+
+func TestAuthorizeTTLUsesNowAsBasis(t *testing.T) {
+	// TTL 按「现在起的剩余时长」判,不按签发时刻的总寿命:
+	// 30 小时前签发、只剩 1 小时的条子,在 max_ttl=2h 下必须放行。
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	cfg := &autonomy.Config{Signers: []autonomy.Signer{{
 		User:     "alice",
 		MaxScope: []string{"systemd:user:restart:*"},
+		MaxTTL:   2 * time.Hour,
+		MaxUses:  2,
 	}}}
-	g := baseGrant(now)
-	g.ExpiresAt = now.Add(20 * time.Hour)
-	g.MaxUses = 10
-	if err := grant.Authorize(cfg, g, 1000, "alice", now); err != nil {
-		t.Fatalf("未设上限时只受全局硬上限约束,实际: %v", err)
+	g := &grant.Grant{
+		ID:        "g-1",
+		Scope:     []string{"systemd:user:restart:nginx.service"},
+		IssuedBy:  "alice",
+		IssuedAt:  now.Add(-30 * time.Hour),
+		ExpiresAt: now.Add(time.Hour),
+		MaxUses:   1,
 	}
-	g.ExpiresAt = now.Add(25 * time.Hour)
-	assertErrContains(t, grant.Authorize(cfg, g, 1000, "alice", now), "有效期")
-	g = baseGrant(now)
-	g.MaxUses = 11
-	assertErrContains(t, grant.Authorize(cfg, g, 1000, "alice", now), "次数")
+	if err := grant.Authorize(cfg, g, 1000, "alice", now); err != nil {
+		t.Fatalf("TTL 应以 now 为基准(剩余 1h < 上限 2h),实际: %v", err)
+	}
 }
 
 func TestAuthorizeSignerWithoutMaxScopeCoversNothing(t *testing.T) {

@@ -205,6 +205,51 @@ func TestRecordUseWaitsForExclusiveLock(t *testing.T) {
 	}
 }
 
+func TestUsedCountsWaitsForExclusiveLock(t *testing.T) {
+	// 读侧同样要拿共享锁(与写侧对称):否则会读到半行。
+	// 判据是「持锁期间不完成」而不是「最后计数对」——删掉 LOCK_SH 这条才会红。
+	path := usagePath(t)
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	if err := grant.RecordUse(path, "g-seed", now); err != nil {
+		t.Fatalf("RecordUse 失败: %v", err)
+	}
+	holder, err := os.OpenFile(path, os.O_RDWR, 0o640)
+	if err != nil {
+		t.Fatalf("打开日志失败: %v", err)
+	}
+	defer holder.Close()
+	if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("加锁失败: %v", err)
+	}
+
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		close(started)
+		_, err := grant.UsedCounts(path)
+		done <- err
+	}()
+	// 等 goroutine 真的起跑再开始计时,避免"还没调就超时"的假通过。
+	<-started
+	select {
+	case err := <-done:
+		t.Fatalf("持锁期间 UsedCounts 不该完成(实际: %v)", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatalf("解锁失败: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("释放锁后 UsedCounts 失败: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("释放锁后 UsedCounts 仍未完成")
+	}
+}
+
 func TestRecordUseIsExclusive(t *testing.T) {
 	path := usagePath(t)
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)

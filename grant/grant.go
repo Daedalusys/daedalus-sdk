@@ -8,7 +8,9 @@ package grant
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"time"
@@ -25,6 +27,8 @@ const (
 
 // Grant 是一张条子:对若干作用域的一次性授权。
 // IssuedBy 只是线索,权威身份由调用方给的属主 uid/属主名决定。
+// 读条子文件必须走 Parse(它做严格校验并归一时间),不要用 json.Unmarshal:
+// 后者会静默产出零值字段的空壳。
 type Grant struct {
 	ID        string
 	Scope     []string
@@ -56,7 +60,9 @@ func Parse(data []byte) (*Grant, error) {
 	if err := dec.Decode(&w); err != nil {
 		return nil, fmt.Errorf("grant: 解析条子失败: %w", err)
 	}
-	if dec.More() {
+	// 残余内容不能用 dec.More() 判:它对紧跟的 ] / } 会返回 false,尾串就被放过了。
+	// 再解码一次拿到 io.EOF 才算 JSON 真的结束。
+	if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("grant: 条子 JSON 之后有多余内容")
 	}
 	if err := validateID(w.ID); err != nil {
@@ -144,7 +150,9 @@ func (g *Grant) Expired(now time.Time) bool {
 // Authorize 判定条子能否被消费:签发者是否合法、范围/有效期/次数是否在其上限内。
 //
 // 权威身份是调用方给的属主 uid 与属主名(文件的属主),条子自称的 issued_by 一律不看。
-// root 恒可签且不限范围,但照样受全局硬上限与危险名单约束。
+// 闸门顺序:条子自身合法性 → 全局硬上限 → 过期 → 危险名单 → root 放行 → 签发者闸门。
+// 全局硬上限、过期、危险名单刻意排在 root 放行之前:它们约束的是条子与目标本身,
+// 不是"谁签的",root 也不能用身份绕开(危险对象本就不该有自主条子)。
 func Authorize(cfg *autonomy.Config, g *Grant, ownerUID uint32, ownerName string, now time.Time) error {
 	if g == nil {
 		return fmt.Errorf("grant: 条子为空")
@@ -160,7 +168,7 @@ func Authorize(cfg *autonomy.Config, g *Grant, ownerUID uint32, ownerName string
 		return fmt.Errorf("grant: 条子次数 %d 超过全局上限 %d", g.MaxUses, GlobalMaxUses)
 	}
 	if !g.ExpiresAt.After(now) {
-		return fmt.Errorf("grant: 条子有效期已过(expires_at=%s, now=%s)", formatTime(g.ExpiresAt), formatTime(now))
+		return fmt.Errorf("grant: 条子已过期(expires_at=%s, now=%s)", formatTime(g.ExpiresAt), formatTime(now))
 	}
 	ttl := g.ExpiresAt.Sub(now)
 	if ttl > GlobalMaxTTL {
@@ -176,19 +184,27 @@ func Authorize(cfg *autonomy.Config, g *Grant, ownerUID uint32, ownerName string
 	if deniedSigner(cfg, ownerName) {
 		return fmt.Errorf("grant: 无权签发:用户 %q 在禁用签发者名单内", ownerName)
 	}
-	signer, ok := findSigner(cfg, ownerName)
-	if !ok {
-		return fmt.Errorf("grant: 无权签发:用户 %q 不在签发者名单内", ownerName)
+	signer, err := findSigner(cfg, ownerName)
+	if err != nil {
+		return err
+	}
+	// 上限为 0 只可能来自程序内构造的配置(加载期已要求必填):按 fail-closed 拒,
+	// 绝不把"少写字段"解释成"不限制"。
+	if signer.MaxTTL <= 0 {
+		return fmt.Errorf("grant: 签发者 %q 的 max_ttl 未配置,拒绝授权", ownerName)
+	}
+	if signer.MaxUses <= 0 {
+		return fmt.Errorf("grant: 签发者 %q 的 max_uses 未配置,拒绝授权", ownerName)
 	}
 	for _, sc := range scopes {
 		if !coveredBy(signer.MaxScope, sc) {
 			return fmt.Errorf("grant: 条子范围 %q 超出授权范围:签发者 %q 的 max_scope 未覆盖", sc.String(), ownerName)
 		}
 	}
-	if signer.MaxTTL > 0 && ttl > signer.MaxTTL {
+	if ttl > signer.MaxTTL {
 		return fmt.Errorf("grant: 条子有效期 %s 超过签发者 %q 的上限 %s", ttl, ownerName, signer.MaxTTL)
 	}
-	if signer.MaxUses > 0 && g.MaxUses > signer.MaxUses {
+	if g.MaxUses > signer.MaxUses {
 		return fmt.Errorf("grant: 条子次数 %d 超过签发者 %q 的上限 %d", g.MaxUses, ownerName, signer.MaxUses)
 	}
 	return nil
@@ -257,17 +273,27 @@ func deniedSigner(cfg *autonomy.Config, name string) bool {
 	return false
 }
 
-// findSigner 按用户名找签发者;名单里没有就是无权签发。
-func findSigner(cfg *autonomy.Config, name string) (autonomy.Signer, bool) {
+// findSigner 找签发者:没有 = 无权签发;同名多条 = 配置非法。
+// 多条时绝不挑一条:挑首条会让后加的收紧条目静默失效(配置更严、行为更松)。
+func findSigner(cfg *autonomy.Config, name string) (autonomy.Signer, error) {
 	if cfg == nil {
-		return autonomy.Signer{}, false
+		return autonomy.Signer{}, fmt.Errorf("grant: 无权签发:用户 %q 不在签发者名单内", name)
 	}
+	var found autonomy.Signer
+	matches := 0
 	for _, signer := range cfg.Signers {
 		if signer.User == name {
-			return signer, true
+			matches++
+			found = signer
 		}
 	}
-	return autonomy.Signer{}, false
+	switch {
+	case matches == 0:
+		return autonomy.Signer{}, fmt.Errorf("grant: 无权签发:用户 %q 不在签发者名单内", name)
+	case matches > 1:
+		return autonomy.Signer{}, fmt.Errorf("grant: 配置非法:签发者名单里用户 %q 重复出现 %d 次,拒绝授权", name, matches)
+	}
+	return found, nil
 }
 
 // validateID 校验条子 id:它会被用作文件名,所以不许带路径分隔符、控制字符

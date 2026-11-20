@@ -211,34 +211,45 @@ func (c *Config) apply(file fileConfig) error {
 	c.DenyNames = names
 
 	signers := make([]Signer, 0, len(file.Signers))
+	// 同名签发者只允许一条:否则"再加一条更严的条目"会因首条命中而静默失效,
+	// 配置看起来更严、实际更松。
+	seenUsers := make(map[string]int, len(file.Signers))
 	for i, signer := range file.Signers {
 		if strings.TrimSpace(signer.User) == "" {
 			return fmt.Errorf("第 %d 个 signer 缺少 user", i+1)
 		}
+		if prev, dup := seenUsers[signer.User]; dup {
+			return fmt.Errorf("第 %d 个 signer 的 user %q 与第 %d 个重复(同一签发者只允许一条)", i+1, signer.User, prev)
+		}
+		seenUsers[signer.User] = i + 1
 		parsed := Signer{User: signer.User, MaxUses: signer.MaxUses}
-		if parsed.MaxUses < 0 {
-			return fmt.Errorf("第 %d 个 signer 的 max_uses 不能为负", i+1)
+		// 上限必须显式写正数:缺省/0 若被当成"不限制",等于"少写一个字段就放宽"。
+		if parsed.MaxUses <= 0 {
+			return fmt.Errorf("第 %d 个 signer 的 max_uses 必须为正(缺省/0 不表示不限制)", i+1)
 		}
 		for j, maxScope := range signer.MaxScope {
-			pattern, err := parsePattern(maxScope)
+			// 与消费侧同一套严格语法:加载期放行的形态必须真的能签出条子,
+			// 否则会变成"配置说 OK、签发永远失败"的静默死配置。
+			scope, err := ParseScope(maxScope)
 			if err != nil {
-				return fmt.Errorf("第 %d 个 signer 的第 %d 条 max_scope 非法: %w", i+1, j+1, err)
+				return fmt.Errorf("第 %d 个 signer 的第 %d 条 max_scope 非法(必须是含动作段的严格作用域): %w", i+1, j+1, err)
 			}
-			if err := validPattern(pattern.target); err != nil {
+			if err := validPattern(scope.Target); err != nil {
 				return fmt.Errorf("第 %d 个 signer 的第 %d 条 max_scope 非法: %w", i+1, j+1, err)
 			}
 			parsed.MaxScope = append(parsed.MaxScope, maxScope)
 		}
-		if signer.MaxTTL != "" {
-			ttl, err := time.ParseDuration(signer.MaxTTL)
-			if err != nil {
-				return fmt.Errorf("第 %d 个 signer 的 max_ttl %q 非法: %w", i+1, signer.MaxTTL, err)
-			}
-			if ttl <= 0 {
-				return fmt.Errorf("第 %d 个 signer 的 max_ttl 必须为正", i+1)
-			}
-			parsed.MaxTTL = ttl
+		if signer.MaxTTL == "" {
+			return fmt.Errorf("第 %d 个 signer 缺少 max_ttl(必须显式写正时长,缺省不表示不限制)", i+1)
 		}
+		ttl, err := time.ParseDuration(signer.MaxTTL)
+		if err != nil {
+			return fmt.Errorf("第 %d 个 signer 的 max_ttl %q 非法: %w", i+1, signer.MaxTTL, err)
+		}
+		if ttl <= 0 {
+			return fmt.Errorf("第 %d 个 signer 的 max_ttl 必须为正", i+1)
+		}
+		parsed.MaxTTL = ttl
 		signers = append(signers, parsed)
 	}
 	c.Signers = signers

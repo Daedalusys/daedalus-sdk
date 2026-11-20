@@ -23,6 +23,7 @@ import (
 const UsageFileName = "grant-usage.jsonl"
 
 // UsageRecord 是一次用量记账:哪张条子、什么时候用的。
+// 本结构即日志行格式:字段改名 = 破坏下游读取方,新增字段才能向后兼容。
 type UsageRecord struct {
 	GrantID string    `json:"grant_id"`
 	UsedAt  time.Time `json:"used_at"`
@@ -52,13 +53,8 @@ func RecordUse(path, grantID string, now time.Time) error {
 	}
 	line = append(line, '\n')
 
-	// 目录不存在则尽力创建,失败留给下面的 open 报错。
-	if dir := filepath.Dir(path); dir != "" {
-		if _, serr := os.Stat(dir); os.IsNotExist(serr) {
-			_ = os.MkdirAll(dir, 0o755)
-		}
-	}
-
+	// 父目录由 dirs.TxRoot() 解析时创建;这里只管写,不再重复一份建目录逻辑,
+	// 免得两个包各持一套权限口径。
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o640)
 	if err != nil {
 		return fmt.Errorf("grant: 打开用量日志失败: %w", err)
