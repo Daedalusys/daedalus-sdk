@@ -26,7 +26,8 @@ var ErrNotFound = errors.New("autonomy: 档位表不存在")
 // ErrEnvNotAbsolute 表示覆盖变量存在但不是绝对路径:直接拒绝,不静默忽略。
 var ErrEnvNotAbsolute = errors.New("autonomy: 覆盖变量为空值或非绝对路径")
 
-// Rule 是一条档位规则:作用域模式(可含 *)→ 档位。
+// Rule 是一条档位规则:作用域模式(可含 *)→ 请求档位。
+// Tier 是请求档位:写 auto 的仍要过 Classify 的降档条件,不满足则降为 confirm。
 // Relaxed 标记"显式放宽"(第三档降到第二档),只允许出现在 confirm 上。
 type Rule struct {
 	Scope   string
@@ -108,7 +109,7 @@ func Load(path string) (*Config, error) {
 	var file fileConfig
 	meta, err := toml.Decode(string(data), &file)
 	if err != nil {
-		return nil, fmt.Errorf("autonomy: 解析 %s 失败(TOML 损坏): %w", path, err)
+		return nil, fmt.Errorf("autonomy: 解析 %s 失败: %w", path, err)
 	}
 	if undecoded := meta.Undecoded(); len(undecoded) > 0 {
 		keys := make([]string, 0, len(undecoded))
@@ -162,7 +163,9 @@ type fileSigner struct {
 }
 
 // apply 校验文件内容并写入配置;任何非法取值都返回 error(不退默认)。
+// 每个面都是整体赋值,不复用调用方已有的切片,避免同一 Config 被复用后静默叠加。
 func (c *Config) apply(file fileConfig) error {
+	rules := make([]Rule, 0, len(file.Rules))
 	for i, rule := range file.Rules {
 		scope, err := ParseScope(rule.Scope)
 		if err != nil {
@@ -181,24 +184,33 @@ func (c *Config) apply(file fileConfig) error {
 		if rule.Relaxed && tier != TierConfirm {
 			return fmt.Errorf("第 %d 条 rule 的 relaxed=true 只能出现在 tier=\"confirm\" 上", i+1)
 		}
-		c.Rules = append(c.Rules, Rule{Scope: rule.Scope, Tier: tier, Relaxed: rule.Relaxed})
+		rules = append(rules, Rule{Scope: rule.Scope, Tier: tier, Relaxed: rule.Relaxed})
 	}
-	for i, deny := range file.Deny {
-		pattern, err := parsePattern(deny)
+	c.Rules = rules
+
+	deny := make([]string, 0, len(file.Deny))
+	for i, entry := range file.Deny {
+		pattern, err := parsePattern(entry)
 		if err != nil {
 			return fmt.Errorf("第 %d 条 deny 非法: %w", i+1, err)
 		}
 		if err := validPattern(pattern.target); err != nil {
 			return fmt.Errorf("第 %d 条 deny 非法: %w", i+1, err)
 		}
-		c.Deny = append(c.Deny, deny)
+		deny = append(deny, entry)
 	}
+	c.Deny = deny
+
+	names := make([]string, 0, len(file.DenyNames))
 	for i, name := range file.DenyNames {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("第 %d 条 deny_names 为空", i+1)
 		}
-		c.DenyNames = append(c.DenyNames, name)
+		names = append(names, name)
 	}
+	c.DenyNames = names
+
+	signers := make([]Signer, 0, len(file.Signers))
 	for i, signer := range file.Signers {
 		if strings.TrimSpace(signer.User) == "" {
 			return fmt.Errorf("第 %d 个 signer 缺少 user", i+1)
@@ -207,15 +219,15 @@ func (c *Config) apply(file fileConfig) error {
 		if parsed.MaxUses < 0 {
 			return fmt.Errorf("第 %d 个 signer 的 max_uses 不能为负", i+1)
 		}
-		for j, scope := range signer.MaxScope {
-			pattern, err := parsePattern(scope)
+		for j, maxScope := range signer.MaxScope {
+			pattern, err := parsePattern(maxScope)
 			if err != nil {
 				return fmt.Errorf("第 %d 个 signer 的第 %d 条 max_scope 非法: %w", i+1, j+1, err)
 			}
 			if err := validPattern(pattern.target); err != nil {
 				return fmt.Errorf("第 %d 个 signer 的第 %d 条 max_scope 非法: %w", i+1, j+1, err)
 			}
-			parsed.MaxScope = append(parsed.MaxScope, scope)
+			parsed.MaxScope = append(parsed.MaxScope, maxScope)
 		}
 		if signer.MaxTTL != "" {
 			ttl, err := time.ParseDuration(signer.MaxTTL)
@@ -227,8 +239,9 @@ func (c *Config) apply(file fileConfig) error {
 			}
 			parsed.MaxTTL = ttl
 		}
-		c.Signers = append(c.Signers, parsed)
+		signers = append(signers, parsed)
 	}
-	c.DenySigners = append(c.DenySigners, file.DenySigners...)
+	c.Signers = signers
+	c.DenySigners = file.DenySigners
 	return nil
 }

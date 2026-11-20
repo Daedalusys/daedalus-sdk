@@ -27,8 +27,8 @@ type Scope struct {
 }
 
 // ParseScope 解析严格形态的作用域串:systemd 四段(runtime:domain:action:target),
-// 其余运行时三段(runtime:action:target)。名单里那种"省略动作段"的宽松形态由
-// 内部模式解析器承担,不进公开 API。
+// 其余运行时三段(runtime:action:target)。名单里 systemd 那种"省略动作段"的宽松形态
+// 由内部模式解析器承担,不进公开 API。
 func ParseScope(s string) (Scope, error) {
 	if s == "" {
 		return Scope{}, fmt.Errorf("autonomy: 作用域为空")
@@ -82,8 +82,8 @@ func (s Scope) Matches(o Scope) bool {
 	return err == nil && ok
 }
 
-// pattern 是名单用的宽松作用域:允许省略动作段(此时匹配任意动作),
-// 段数由运行时决定(systemd 三/四段,其余二/三段)。
+// pattern 是名单用的宽松作用域:只有 systemd 允许省略动作段(此时匹配任意动作),
+// 其余运行时与 ParseScope 一样必须写 action:target,不开放"任意动作"的自创宽松面。
 type pattern struct {
 	runtime string
 	domain  string
@@ -92,7 +92,7 @@ type pattern struct {
 }
 
 // parsePattern 解析名单作用域。systemd:domain[:action]:target;
-// 其余运行时:target 或 action:target。段数错、词表外取值一律拒绝。
+// 其余运行时:action:target。
 func parsePattern(s string) (pattern, error) {
 	if s == "" {
 		return pattern{}, fmt.Errorf("作用域为空")
@@ -130,15 +130,13 @@ func parsePattern(s string) (pattern, error) {
 		return p, nil
 	}
 	switch len(rest) {
-	case 1:
-		p.target = rest[0]
 	case 2:
 		p.action, p.target = rest[0], rest[1]
 		if !contains(actionVocabulary, p.action) {
 			return pattern{}, fmt.Errorf("作用域 %q 的动作 %q 不在词表内", s, p.action)
 		}
 	default:
-		return pattern{}, fmt.Errorf("%s 作用域 %q 必须是两段或三段", rt, s)
+		return pattern{}, fmt.Errorf("%s 作用域 %q 必须是三段(runtime:action:target)", rt, s)
 	}
 	return p, nil
 }
