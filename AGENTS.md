@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 Daedalus SDK 仓根 = 四层结构中的 **SDK 层**(决策 23/24 + 25)。
-11 个安全核心包(从 `daedalus-core/internal/` 迁出)+ slot 词汇包 +
+13 个安全核心包(11 个从 `daedalus-core/internal/` 迁出)+ slot 词汇包 +
 SecretProvider/MemoryProvider contract 包(daedalus-sdk#2 填实)+ 3 个 Provider/Slot 占位目录 +
 2 个编排器裁决迁入包(`state/` `dirs/`)。**公开 contract 仓**:包是顶级包,可被外部模块 import;
 失去 Go 编译器"同模块限可见"防护,威胁模型见下段。
@@ -17,6 +17,8 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 ├── audit/         # 哈希链审计库 (Python 金样字节级兼容)
 ├── confirmation/  # 通用单次性确认令牌 (confirm_token 契约缝; blueprint/disk-clean/organize 共用)
 ├── policy/        # policy.toml 严格加载 (ErrNotFound 哨兵 / Default / ALLOW_COMMANDS REPLACE)
+├── autonomy/      # AI agent 受控变更的档位表 (作用域寻址 / 严格加载 / 出厂预设 / 三档判定)
+├── grant/         # 变更条子的严格解析 / 签发者授权判定 / 用量记账 (单向依赖 autonomy)
 ├── pathguard/     # fs 路径校验 (读 ValidatePath + 写二档 ValidateWritePath)
 ├── shellpolicy/   # 15 命令 / 4 bin 目录 / 路径规则权威实现
 ├── pkgquery/      # dnf/rpm 只读查询 (rpm 优先 / dnf repoquery 兜底)

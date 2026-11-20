@@ -1,6 +1,6 @@
 # daedalus-sdk — Daedalus SDK 仓根
 
-四层结构(决策 23/24 + 25)中的 **SDK 层**:11 个安全核心包 + slot 词汇包 +
+四层结构(决策 23/24 + 25)中的 **SDK 层**:13 个安全核心包 + slot 词汇包 +
 SecretProvider/MemoryProvider 契约包(daedalus-sdk#2 填实)+ 3 个 Provider/Slot 占位目录,
 独立 Go 模块(`module github.com/Daedalusys/daedalus-sdk`),独立仓根。
 SDK 包由 `daedalus-core/` 与 `daedalus-plugins/` 经 `replace` 指令本地引用
@@ -10,7 +10,7 @@ SDK 包由 `daedalus-core/` 与 `daedalus-plugins/` 经 `replace` 指令本地�
 > "同模块限可见"防护,任何模块都可 import。威胁模型见下方
 > 「Security surface / threat model」段——这是有意的 trade-off,不是疏漏。
 
-## 包索引(11 个安全核心包)
+## 包索引(13 个安全核心包)
 
 | 包 | 职责 | 消费方 |
 |----|------|--------|
@@ -25,6 +25,8 @@ SDK 包由 `daedalus-core/` 与 `daedalus-plugins/` 经 `replace` 指令本地�
 | `i18n/` | locale 文件与 `t(key, ...args)` 翻译基础设施 | copilot、Go 侧 MCP server(P1 接入) |
 | `blueprint/` | 蓝图 schema 校验 + 渲染(jsonschema-go 预编译) | `daedalus-plugins/blueprint` |
 | `version/` | 版本常量与构建信息 | 各二进制 |
+| `autonomy/` | AI agent 受控变更的档位表(作用域寻址、严格加载、出厂预设、三档判定) | `grant/`(本仓) |
+| `grant/` | 变更条子的严格解析、签发者授权判定、用量记账 | — |
 
 **附加包(todo 6 编排器裁决迁入)**:`state/`(state.jsonl 追加式观测缓存)与
 `dirs/`(state/tx 根路径统一解析链)因 Go internal 跨模块规则随 service 插件迁入本仓,
