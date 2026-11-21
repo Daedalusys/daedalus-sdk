@@ -37,9 +37,15 @@ type Grant struct {
 	ExpiresAt time.Time
 	MaxUses   int
 	Note      string
-	// ForUser 是「这张条子给谁用」。只有当条子文件**属主是 root** 时它才被采信:
-	// root 拥有的文件别人改不动,所以这句话可信。属主不是 root 时这个字段一律忽略
-	// (属主与执行者相同才用得上)。
+	// ForUID 是「这张条子给谁用」的权威字段(执行者 uid)。
+	// nil = 未指定。指针而不是 uint32 是因为 uid 0 是 root 自己:用 0 同时表达
+	// 「未指定」与「给 root」会让两种条子长得一样,而这两种的判定完全相反。
+	//
+	// 它只在条子文件**属主是 root** 时被采信:root 拥有的文件别人改不动,所以
+	// root 写下的这句话可信;属主不是 root 时这个字段一律忽略(见 BindExecutor)。
+	ForUID *uint32
+	// ForUser 是 ForUID 对应的账号名,只作展示(人读条子文件时看得懂)。
+	// 判定一律以 ForUID 为准:账号名会改、会被复用,uid 不会。
 	ForUser string
 }
 
@@ -53,6 +59,7 @@ type wireGrant struct {
 	ExpiresAt string   `json:"expires_at"`
 	MaxUses   int      `json:"max_uses"`
 	Note      string   `json:"note"`
+	ForUID    *uint32  `json:"for_uid,omitempty"`
 	ForUser   string   `json:"for_user,omitempty"`
 }
 
@@ -100,8 +107,8 @@ func Parse(data []byte) (*Grant, error) {
 	if w.MaxUses <= 0 {
 		return nil, fmt.Errorf("grant: 条子次数 %d 非法(至少 1 次)", w.MaxUses)
 	}
-	if err := validateForUser(w.ForUser); err != nil {
-		return nil, fmt.Errorf("grant: 条子 for_user 非法: %w", err)
+	if err := validateBinding(w.ForUID, w.ForUser); err != nil {
+		return nil, fmt.Errorf("grant: 条子绑定字段非法: %w", err)
 	}
 	return &Grant{
 		ID:        w.ID,
@@ -111,8 +118,25 @@ func Parse(data []byte) (*Grant, error) {
 		ExpiresAt: expiresAt,
 		MaxUses:   w.MaxUses,
 		Note:      w.Note,
+		ForUID:    w.ForUID,
 		ForUser:   w.ForUser,
 	}, nil
+}
+
+// validateBinding 校验「这张条子给谁用」的两个字段:要么都填,要么都空。
+// 单独填 for_user 会让「给谁」与「谁能用」两件事脱节(人看到 alice,判定却按
+// 未绑定处理),所以那种形状一律拒,不做善意猜测。
+func validateBinding(forUID *uint32, forUser string) error {
+	if forUID == nil && forUser == "" {
+		return nil
+	}
+	if forUID == nil {
+		return fmt.Errorf("for_user 非空时必须同时写 for_uid(uid 0 是 root,不能当作「未指定」)")
+	}
+	if forUser == "" {
+		return fmt.Errorf("for_uid 非空时必须同时写 for_user")
+	}
+	return validateForUser(forUser)
 }
 
 // validateForUser 校验 for_user:它会进「谁拿到这张条子」的判定,形态必须收窄。
@@ -145,6 +169,7 @@ func (g Grant) MarshalJSON() ([]byte, error) {
 		ExpiresAt: formatTime(g.ExpiresAt),
 		MaxUses:   g.MaxUses,
 		Note:      g.Note,
+		ForUID:    g.ForUID,
 		ForUser:   g.ForUser,
 	}
 	data, err := json.Marshal(w)
@@ -247,16 +272,33 @@ func Authorize(cfg *autonomy.Config, g *Grant, ownerUID uint32, ownerName string
 // agent 都能拿去用,而动作发生在**使用者**自己的 user 域里,于是「人类点头的
 // 那件事」和人真正做的事对不上号。
 //
-// 判定只信两样东西:文件属主(来自 stat,不可伪造)与 root 拥有文件里的 for_user
-// (root 的文件别人改不动,所以这句话可信)。JSON 里其它自报字段一律不认。
+// 判定只信两样东西:文件属主(来自 stat,不可伪造)与条子里的 for_uid。JSON 里
+// 其它自报字段一律不认。
 //
-//	属主 == 执行者            → 自己的条子自己用
-//	属主 == root 且 for_user 匹配 → root 签给你
-//	属主 == root 且没有 for_user → 拒(root 必须写明给谁)
-//	其余                       → 拒(条子属于别人)
+//	属主 == 执行者              → 自己的条子自己用
+//	属主 == root 且 for_uid 匹配 → root 签给你
+//	属主 == root 且未绑定        → 拒(root 必须写明给谁)
+//	属主 != root 且声明了 for_uid → 拒(非 root 属主改得了自己的文件,这句话不算数)
+//	其余                         → 拒(条子属于别人)
+//
+// for_uid 只在**属主是 root** 时被采信:非 root 属主随时能改写自己的条子文件,
+// 那句话只能代表他自己,不能代表「这张给谁」。反过来,root 拥有的文件别人改不动,
+// 所以 root 写下的 for_uid 可信。
+//
+// for_uid 比账号名可靠:账号会被改名、被删除后复用同一个名字,uid 不会。
+// uid 0 是 root 自己,不是「未指定」—— 未指定用 nil 表达,不用 0 冒充。
 func BindExecutor(g *Grant, ownerUID uint32, ownerName string, executorUID uint32, executorName string) error {
 	if g == nil {
 		return fmt.Errorf("grant: 条子为空")
+	}
+	if ownerUID != 0 && g.ForUID != nil {
+		return fmt.Errorf("grant: 非 root 属主(%q)的条子不能指定执行者;绑定使用者只能由 root 签", ownerName)
+	}
+	if g.ForUID != nil {
+		if *g.ForUID != executorUID {
+			return fmt.Errorf("grant: 这张条子是给 %q(uid=%d)的,不是给 %q(uid=%d)的", g.ForUser, *g.ForUID, executorName, executorUID)
+		}
+		return nil
 	}
 	if ownerUID == executorUID {
 		return nil
@@ -264,13 +306,27 @@ func BindExecutor(g *Grant, ownerUID uint32, ownerName string, executorUID uint3
 	if ownerUID != 0 {
 		return fmt.Errorf("grant: 条子属于 %q,不能给 %q 用", ownerName, executorName)
 	}
-	if g.ForUser == "" {
-		return fmt.Errorf("grant: root 签的条子必须写明给谁(for_user),否则任何人都能拿去用")
+	return fmt.Errorf("grant: root 签的条子必须写明给谁(for_user),否则任何人都能拿去用")
+}
+
+// BoundExecutorUID 返回这张条子唯一合法的执行者 uid(供 `grant list` 找对账本)。
+// bound=false 表示这张条子在当前属主下没有合法执行者(root 签但没写明给谁,
+// 或非 root 属主却声明了 for_uid)。本函数与 BindExecutor 的绑定半段同源,
+// 由一致性测试钉住 —— 两处各推一份必然漂移,而漂移的那一处就是越权口子。
+func BoundExecutorUID(g *Grant, ownerUID uint32) (uid uint32, bound bool) {
+	if g == nil {
+		return 0, false
 	}
-	if g.ForUser != executorName {
-		return fmt.Errorf("grant: 这张条子是给 %q 的,不是给 %q 的", g.ForUser, executorName)
+	if ownerUID != 0 {
+		if g.ForUID != nil {
+			return 0, false
+		}
+		return ownerUID, true
 	}
-	return nil
+	if g.ForUID == nil {
+		return 0, false
+	}
+	return *g.ForUID, true
 }
 
 // parsedScopes 解析条子里的全部范围;任一条坏 ⇒ 整张条子作废。

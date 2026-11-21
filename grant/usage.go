@@ -35,6 +35,13 @@ type UsageRecord struct {
 	UsedAt  time.Time `json:"used_at"`
 }
 
+// UsageFileNameFor 拼出某个执行者的用量账本文件名。
+// 单独暴露是为了让调用方(消费侧、CLI、测试)不必各拼一份字符串:拼法漂移会让
+// 「写进 A 的账本、读 B 的账本」这类错误静默发生。
+func UsageFileNameFor(uid uint32) string {
+	return fmt.Sprintf("%s%d%s", UsageFilePrefix, uid, UsageFileSuffix)
+}
+
 // UsageLogPathFor 解析某个执行者的用量日志路径:tx 根目录 + usage-<uid>.jsonl。
 // uid 是执行者的 uid(不是签发者的):账本归记账的人所有。
 func UsageLogPathFor(uid uint32) (string, error) {
@@ -42,7 +49,7 @@ func UsageLogPathFor(uid uint32) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("grant: 解析用量日志根目录失败: %w", err)
 	}
-	return filepath.Join(root, fmt.Sprintf("%s%d%s", UsageFilePrefix, uid, UsageFileSuffix)), nil
+	return filepath.Join(root, UsageFileNameFor(uid)), nil
 }
 
 // RecordUse 追加一条用量记账:整行一次写入 + flock 排他,保证并发下不交错、不丢计。

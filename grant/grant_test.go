@@ -179,6 +179,7 @@ func TestParseGrantRejectsBrokenJSON(t *testing.T) {
 func TestGrantMarshalRoundTrip(t *testing.T) {
 	// MarshalJSON 与 Parse 必须互为逆运算:条子文件的读写两端只有一个事实源。
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	forUID := uint32(1000)
 	want := &grant.Grant{
 		ID:        "g-1",
 		Scope:     []string{"systemd:user:restart:nginx.service", "podman:stop:test-web"},
@@ -187,6 +188,7 @@ func TestGrantMarshalRoundTrip(t *testing.T) {
 		ExpiresAt: now.Add(time.Hour),
 		MaxUses:   2,
 		Note:      "半夜 nginx 挂了就重启",
+		ForUID:    &forUID,
 		ForUser:   "alice",
 	}
 	data, err := json.Marshal(want)
@@ -202,6 +204,10 @@ func TestGrantMarshalRoundTrip(t *testing.T) {
 	}
 	if got.ForUser != want.ForUser {
 		t.Fatalf("往返后 for_user 丢失: %q, 期望 %q", got.ForUser, want.ForUser)
+	}
+	// for_uid 是判定的权威字段:往返丢了它 = 一张「给谁都能用」的条子。
+	if got.ForUID == nil || *got.ForUID != forUID {
+		t.Fatalf("往返后 for_uid 丢失: %v, 期望 %d", got.ForUID, forUID)
 	}
 	if !got.IssuedAt.Equal(want.IssuedAt) || !got.ExpiresAt.Equal(want.ExpiresAt) {
 		t.Fatalf("往返后时间不一致: %s / %s", got.IssuedAt, got.ExpiresAt)
@@ -578,8 +584,10 @@ func TestBindExecutor(t *testing.T) {
 	// 一张没绑执行者的条子就是节点级通行证,任何本地用户的 agent 都能拿去用。
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	g := baseGrant(now)
+	uid := func(v uint32) *uint32 { return &v }
 	cases := []struct {
 		name       string
+		forUID     *uint32
 		forUser    string
 		ownerUID   uint32
 		ownerName  string
@@ -589,14 +597,17 @@ func TestBindExecutor(t *testing.T) {
 		wantSubstr string
 	}{
 		{name: "属主=执行者 ⇒ 自己的条子自己用", ownerUID: 1000, ownerName: "alice", execUID: 1000, execName: "alice"},
-		{name: "root 签给你 ⇒ 放行", forUser: "alice", ownerUID: 0, ownerName: "root", execUID: 1000, execName: "alice"},
+		{name: "root 签给你 ⇒ 放行", forUID: uid(1000), forUser: "alice", ownerUID: 0, ownerName: "root", execUID: 1000, execName: "alice"},
 		{name: "root 签的没写给谁 ⇒ 拒", ownerUID: 0, ownerName: "root", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "for_user"},
-		{name: "root 签给别人 ⇒ 拒", forUser: "bob", ownerUID: 0, ownerName: "root", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "给"},
-		{name: "别人的条子 ⇒ 拒", forUser: "alice", ownerUID: 1001, ownerName: "bob", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "属于"},
+		{name: "root 签给别人 ⇒ 拒", forUID: uid(1001), forUser: "bob", ownerUID: 0, ownerName: "root", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "给"},
+		{name: "别人的条子 ⇒ 拒", ownerUID: 1001, ownerName: "bob", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "属于"},
+		{name: "非 root 属主自称绑给谁 ⇒ 拒", forUID: uid(1001), forUser: "bob", ownerUID: 1000, ownerName: "alice", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "root"},
+		{name: "非 root 属主自称绑给别人 ⇒ 拒", forUID: uid(1001), forUser: "bob", ownerUID: 1000, ownerName: "alice", execUID: 1001, execName: "bob", wantErr: true, wantSubstr: "root"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := *g
+			got.ForUID = tc.forUID
 			got.ForUser = tc.forUser
 			err := grant.BindExecutor(&got, tc.ownerUID, tc.ownerName, tc.execUID, tc.execName)
 			if tc.wantErr {
@@ -621,16 +632,157 @@ func TestBindExecutorNilGrant(t *testing.T) {
 	}
 }
 
-func TestParseAcceptsForUser(t *testing.T) {
+// BoundExecutorUID 必须与 BindExecutor 的绑定半段同源:两处各推一份必然漂移,
+// 漂移的那一处就是越权口子(比如 grant list 指向别人的账本、或按 uid 找错人)。
+func TestBoundExecutorUIDMatchesBindExecutor(t *testing.T) {
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
-	raw := fmt.Sprintf(`{"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_by":"root","issued_at":"%s","expires_at":"%s","max_uses":1,"for_user":"alice"}`,
+	base := baseGrant(now)
+	uid := func(v uint32) *uint32 { return &v }
+	cases := []struct {
+		name     string
+		forUID   *uint32
+		forUser  string
+		ownerUID uint32
+		owner    string
+	}{
+		{"非 root 属主未绑定", nil, "", 1000, "alice"},
+		{"非 root 属主自称绑定", uid(1001), "bob", 1000, "alice"},
+		{"root 属主绑定给 alice", uid(1000), "alice", 0, "root"},
+		{"root 属主未绑定", nil, "", 0, "root"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := *base
+			g.ForUID = tc.forUID
+			g.ForUser = tc.forUser
+			boundUID, bound := grant.BoundExecutorUID(&g, tc.ownerUID)
+			if !bound {
+				return
+			}
+			// 判定为「合法执行者」时,BindExecutor 必须放行这个 uid。
+			if err := grant.BindExecutor(&g, tc.ownerUID, tc.owner, boundUID, "executor"); err != nil {
+				t.Fatalf("BoundExecutorUID 说 uid=%d 合法,BindExecutor 却拒绝: %v", boundUID, err)
+			}
+		})
+	}
+}
+
+func TestBoundExecutorUIDNoLegalExecutor(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	base := baseGrant(now)
+	// root 签但没写明给谁 ⇒ 没有任何合法执行者。
+	if _, bound := grant.BoundExecutorUID(base, 0); bound {
+		t.Fatalf("root 签的未绑定条子不该有合法执行者")
+	}
+	// 非 root 属主却自称绑给 bob ⇒ 同样没有合法执行者。
+	g := *base
+	other := uint32(1001)
+	g.ForUID = &other
+	if _, bound := grant.BoundExecutorUID(&g, 1000); bound {
+		t.Fatalf("非 root 属主自称绑定的条子不该有合法执行者")
+	}
+}
+
+func TestParseAcceptsBinding(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	raw := fmt.Sprintf(`{"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_by":"root","issued_at":"%s","expires_at":"%s","max_uses":1,"for_uid":1000,"for_user":"alice"}`,
 		now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
 	g, err := grant.Parse([]byte(raw))
 	if err != nil {
-		t.Fatalf("带 for_user 的条子应能解析: %v", err)
+		t.Fatalf("带绑定字段的条子应能解析: %v", err)
 	}
 	if g.ForUser != "alice" {
 		t.Fatalf("for_user 解析结果 = %q", g.ForUser)
+	}
+	if g.ForUID == nil || *g.ForUID != 1000 {
+		t.Fatalf("for_uid 解析结果 = %v, 期望 1000", g.ForUID)
+	}
+}
+
+// for_uid=0 必须原样出现在 JSON 里:omitted 与 0 的区别就是「没绑定」与
+// 「绑给 root」的区别,序列化时把它抹掉就等于凭空造出一张节点级通行证。
+func TestMarshalKeepsForUIDZero(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	zero := uint32(0)
+	g := &grant.Grant{
+		ID: "g-1", Scope: []string{"systemd:user:restart:nginx.service"},
+		IssuedBy: "root", IssuedAt: now, ExpiresAt: now.Add(time.Hour),
+		MaxUses: 1, ForUID: &zero, ForUser: "root",
+	}
+	data, err := json.Marshal(g)
+	if err != nil {
+		t.Fatalf("Marshal 失败: %v", err)
+	}
+	if !strings.Contains(string(data), `"for_uid":0`) {
+		t.Fatalf("for_uid=0 在 JSON 里被抹掉了: %s", data)
+	}
+	back, err := grant.Parse(data)
+	if err != nil {
+		t.Fatalf("往返解析失败: %v", err)
+	}
+	if back.ForUID == nil || *back.ForUID != 0 {
+		t.Fatalf("往返后 for_uid 丢了: %v", back.ForUID)
+	}
+}
+
+// 未绑定时不得凭空冒出 for_uid 键:那个键的存在本身就是「有绑定」的声明。
+func TestMarshalOmitsUnsetForUID(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	g := &grant.Grant{
+		ID: "g-1", Scope: []string{"systemd:user:restart:nginx.service"},
+		IssuedBy: "alice", IssuedAt: now, ExpiresAt: now.Add(time.Hour), MaxUses: 1,
+	}
+	data, err := json.Marshal(g)
+	if err != nil {
+		t.Fatalf("Marshal 失败: %v", err)
+	}
+	if strings.Contains(string(data), "for_uid") {
+		t.Fatalf("未绑定的条子不该出现 for_uid 键: %s", data)
+	}
+}
+
+// for_uid=0 是 root 自己,不是「未指定」:未指定必须是不写这个键。
+func TestParseKeepsForUIDZeroDistinctFromUnset(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	raw := fmt.Sprintf(`{"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_by":"root","issued_at":"%s","expires_at":"%s","max_uses":1,"for_uid":0,"for_user":"root"}`,
+		now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+	g, err := grant.Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("for_uid=0 的条子应能解析: %v", err)
+	}
+	if g.ForUID == nil {
+		t.Fatalf("for_uid=0 解析成了未指定: uid 0 是 root,不是「没写」")
+	}
+	if *g.ForUID != 0 {
+		t.Fatalf("for_uid 解析结果 = %d, 期望 0", *g.ForUID)
+	}
+	// 不写 for_uid ⇒ 未指定。
+	raw2 := fmt.Sprintf(`{"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_by":"alice","issued_at":"%s","expires_at":"%s","max_uses":1}`,
+		now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+	g2, err := grant.Parse([]byte(raw2))
+	if err != nil {
+		t.Fatalf("不带绑定字段的条子应能解析: %v", err)
+	}
+	if g2.ForUID != nil {
+		t.Fatalf("不带 for_uid 时应解析成未指定,实际 = %v", *g2.ForUID)
+	}
+}
+
+// 两个绑定字段必须同时出现:只写一个会让「给谁」与「谁能用」脱节。
+func TestParseRejectsHalfBinding(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	base := fmt.Sprintf(`"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_by":"root","issued_at":"%s","expires_at":"%s","max_uses":1`,
+		now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+	cases := map[string]string{
+		"只有 for_user": fmt.Sprintf("{%s,\"for_user\":\"alice\"}", base),
+		"只有 for_uid":  fmt.Sprintf("{%s,\"for_uid\":1000}", base),
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := grant.Parse([]byte(raw)); err == nil {
+				t.Fatalf("只写一半绑定字段的条子应被拒绝")
+			}
+		})
 	}
 }
 
@@ -639,7 +791,7 @@ func TestParseRejectsBadForUser(t *testing.T) {
 	base := fmt.Sprintf(`"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_by":"root","issued_at":"%s","expires_at":"%s","max_uses":1`,
 		now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
 	for _, bad := range []string{"a/b", "a b", "a\\b", "a\x00b", "a:b"} {
-		raw := fmt.Sprintf("{%s,\"for_user\":%q}", base, bad)
+		raw := fmt.Sprintf("{%s,\"for_uid\":1000,\"for_user\":%q}", base, bad)
 		if _, err := grant.Parse([]byte(raw)); err == nil {
 			t.Fatalf("非法 for_user %q 竟被接受", bad)
 		}
