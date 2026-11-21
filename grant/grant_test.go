@@ -3,6 +3,7 @@ package grant_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,7 @@ func TestGrantMarshalRoundTrip(t *testing.T) {
 		ExpiresAt: now.Add(time.Hour),
 		MaxUses:   2,
 		Note:      "半夜 nginx 挂了就重启",
+		ForUser:   "alice",
 	}
 	data, err := json.Marshal(want)
 	if err != nil {
@@ -197,6 +199,9 @@ func TestGrantMarshalRoundTrip(t *testing.T) {
 	}
 	if got.ID != want.ID || got.IssuedBy != want.IssuedBy || got.MaxUses != want.MaxUses || got.Note != want.Note {
 		t.Fatalf("往返后字段不一致: %+v", got)
+	}
+	if got.ForUser != want.ForUser {
+		t.Fatalf("往返后 for_user 丢失: %q, 期望 %q", got.ForUser, want.ForUser)
 	}
 	if !got.IssuedAt.Equal(want.IssuedAt) || !got.ExpiresAt.Equal(want.ExpiresAt) {
 		t.Fatalf("往返后时间不一致: %s / %s", got.IssuedAt, got.ExpiresAt)
@@ -565,5 +570,78 @@ func TestAuthorizeNilGrantRejected(t *testing.T) {
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	if err := grant.Authorize(aliceConfig(), nil, 0, "root", now); err == nil {
 		t.Fatalf("空条子应被拒绝")
+	}
+}
+
+func TestBindExecutor(t *testing.T) {
+	// 签发者(文件属主)与执行者(消费侧进程身份)必须分开:
+	// 一张没绑执行者的条子就是节点级通行证,任何本地用户的 agent 都能拿去用。
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	g := baseGrant(now)
+	cases := []struct {
+		name       string
+		forUser    string
+		ownerUID   uint32
+		ownerName  string
+		execUID    uint32
+		execName   string
+		wantErr    bool
+		wantSubstr string
+	}{
+		{name: "属主=执行者 ⇒ 自己的条子自己用", ownerUID: 1000, ownerName: "alice", execUID: 1000, execName: "alice"},
+		{name: "root 签给你 ⇒ 放行", forUser: "alice", ownerUID: 0, ownerName: "root", execUID: 1000, execName: "alice"},
+		{name: "root 签的没写给谁 ⇒ 拒", ownerUID: 0, ownerName: "root", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "for_user"},
+		{name: "root 签给别人 ⇒ 拒", forUser: "bob", ownerUID: 0, ownerName: "root", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "给"},
+		{name: "别人的条子 ⇒ 拒", forUser: "alice", ownerUID: 1001, ownerName: "bob", execUID: 1000, execName: "alice", wantErr: true, wantSubstr: "属于"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := *g
+			got.ForUser = tc.forUser
+			err := grant.BindExecutor(&got, tc.ownerUID, tc.ownerName, tc.execUID, tc.execName)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("期望拒绝,实际放行")
+				}
+				if !strings.Contains(err.Error(), tc.wantSubstr) {
+					t.Fatalf("错误信息应含 %q: %v", tc.wantSubstr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("期望放行,实际: %v", err)
+			}
+		})
+	}
+}
+
+func TestBindExecutorNilGrant(t *testing.T) {
+	if err := grant.BindExecutor(nil, 1000, "alice", 1000, "alice"); err == nil {
+		t.Fatalf("空条子应被拒绝")
+	}
+}
+
+func TestParseAcceptsForUser(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	raw := fmt.Sprintf(`{"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_by":"root","issued_at":"%s","expires_at":"%s","max_uses":1,"for_user":"alice"}`,
+		now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+	g, err := grant.Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("带 for_user 的条子应能解析: %v", err)
+	}
+	if g.ForUser != "alice" {
+		t.Fatalf("for_user 解析结果 = %q", g.ForUser)
+	}
+}
+
+func TestParseRejectsBadForUser(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	base := fmt.Sprintf(`"id":"g-1","scope":["systemd:user:restart:x.service"],"issued_by":"root","issued_at":"%s","expires_at":"%s","max_uses":1`,
+		now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+	for _, bad := range []string{"a/b", "a b", "a\\b", "a\x00b", "a:b"} {
+		raw := fmt.Sprintf("{%s,\"for_user\":%q}", base, bad)
+		if _, err := grant.Parse([]byte(raw)); err == nil {
+			t.Fatalf("非法 for_user %q 竟被接受", bad)
+		}
 	}
 }

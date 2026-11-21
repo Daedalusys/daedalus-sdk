@@ -19,8 +19,14 @@ import (
 	"github.com/Daedalusys/daedalus-sdk/dirs"
 )
 
-// UsageFileName 是用量日志的文件名(位于 dirs.TxRoot() 之下)。
-const UsageFileName = "grant-usage.jsonl"
+// UsageFilePrefix / UsageFileSuffix 是用量日志的文件名形态(位于 dirs.TxRoot() 之下)。
+// 账本**按执行者分文件**:全节点一份时,第一个创建者拥有那个文件,第二个用户
+// 打不开它 ⇒ 记账失败 ⇒ fail-closed ⇒ 他的第二档永远不可用。分文件后谁也动不了
+// 别人的账,顺带把「借别人的条子」也堵上(记账要写进条子属主的账本)。
+const (
+	UsageFilePrefix = "usage-"
+	UsageFileSuffix = ".jsonl"
+)
 
 // UsageRecord 是一次用量记账:哪张条子、什么时候用的。
 // 本结构即日志行格式:字段改名 = 破坏下游读取方,新增字段才能向后兼容。
@@ -29,13 +35,14 @@ type UsageRecord struct {
 	UsedAt  time.Time `json:"used_at"`
 }
 
-// UsageLogPath 解析用量日志路径:tx 根目录 + 固定文件名。
-func UsageLogPath() (string, error) {
+// UsageLogPathFor 解析某个执行者的用量日志路径:tx 根目录 + usage-<uid>.jsonl。
+// uid 是执行者的 uid(不是签发者的):账本归记账的人所有。
+func UsageLogPathFor(uid uint32) (string, error) {
 	root, err := dirs.TxRoot()
 	if err != nil {
 		return "", fmt.Errorf("grant: 解析用量日志根目录失败: %w", err)
 	}
-	return filepath.Join(root, UsageFileName), nil
+	return filepath.Join(root, fmt.Sprintf("%s%d%s", UsageFilePrefix, uid, UsageFileSuffix)), nil
 }
 
 // RecordUse 追加一条用量记账:整行一次写入 + flock 排他,保证并发下不交错、不丢计。

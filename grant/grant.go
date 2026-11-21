@@ -37,6 +37,10 @@ type Grant struct {
 	ExpiresAt time.Time
 	MaxUses   int
 	Note      string
+	// ForUser 是「这张条子给谁用」。只有当条子文件**属主是 root** 时它才被采信:
+	// root 拥有的文件别人改不动,所以这句话可信。属主不是 root 时这个字段一律忽略
+	// (属主与执行者相同才用得上)。
+	ForUser string
 }
 
 // wireGrant 是条子文件的 JSON 形态:时间用 RFC3339 字符串,便于人工审阅。
@@ -49,6 +53,7 @@ type wireGrant struct {
 	ExpiresAt string   `json:"expires_at"`
 	MaxUses   int      `json:"max_uses"`
 	Note      string   `json:"note"`
+	ForUser   string   `json:"for_user,omitempty"`
 }
 
 // Parse 解析条子文件内容。缺字段/时间非法/作用域非法/未知键一律拒绝:
@@ -95,6 +100,9 @@ func Parse(data []byte) (*Grant, error) {
 	if w.MaxUses <= 0 {
 		return nil, fmt.Errorf("grant: 条子次数 %d 非法(至少 1 次)", w.MaxUses)
 	}
+	if err := validateForUser(w.ForUser); err != nil {
+		return nil, fmt.Errorf("grant: 条子 for_user 非法: %w", err)
+	}
 	return &Grant{
 		ID:        w.ID,
 		Scope:     w.Scope,
@@ -103,7 +111,28 @@ func Parse(data []byte) (*Grant, error) {
 		ExpiresAt: expiresAt,
 		MaxUses:   w.MaxUses,
 		Note:      w.Note,
+		ForUser:   w.ForUser,
 	}, nil
+}
+
+// validateForUser 校验 for_user:它会进「谁拿到这张条子」的判定,形态必须收窄。
+// 只允许常见的用户名形态(字母数字与少量符号),拒绝路径分隔符、控制字符与空串。
+func validateForUser(name string) error {
+	if name == "" {
+		return nil
+	}
+	if len(name) > 64 {
+		return fmt.Errorf("用户名过长(最多 64 字节): %q", name)
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.', r == '@':
+		default:
+			return fmt.Errorf("用户名含非法字符 %q", r)
+		}
+	}
+	return nil
 }
 
 // MarshalJSON 输出条子文件内容:时间恒 UTC RFC3339,与 Parse 互为逆运算。
@@ -116,6 +145,7 @@ func (g Grant) MarshalJSON() ([]byte, error) {
 		ExpiresAt: formatTime(g.ExpiresAt),
 		MaxUses:   g.MaxUses,
 		Note:      g.Note,
+		ForUser:   g.ForUser,
 	}
 	data, err := json.Marshal(w)
 	if err != nil {
@@ -206,6 +236,39 @@ func Authorize(cfg *autonomy.Config, g *Grant, ownerUID uint32, ownerName string
 	}
 	if g.MaxUses > signer.MaxUses {
 		return fmt.Errorf("grant: 条子次数 %d 超过签发者 %q 的上限 %d", g.MaxUses, ownerName, signer.MaxUses)
+	}
+	return nil
+}
+
+// BindExecutor 判断「这张条子能不能给这个执行者用」。
+//
+// 签发者是文件属主,执行者是真正跑消费侧的那个身份(agent 进程的用户)。
+// 两者必须分开:一张没绑执行者的条子就是**节点级通行证** —— 任何本地用户的
+// agent 都能拿去用,而动作发生在**使用者**自己的 user 域里,于是「人类点头的
+// 那件事」和人真正做的事对不上号。
+//
+// 判定只信两样东西:文件属主(来自 stat,不可伪造)与 root 拥有文件里的 for_user
+// (root 的文件别人改不动,所以这句话可信)。JSON 里其它自报字段一律不认。
+//
+//	属主 == 执行者            → 自己的条子自己用
+//	属主 == root 且 for_user 匹配 → root 签给你
+//	属主 == root 且没有 for_user → 拒(root 必须写明给谁)
+//	其余                       → 拒(条子属于别人)
+func BindExecutor(g *Grant, ownerUID uint32, ownerName string, executorUID uint32, executorName string) error {
+	if g == nil {
+		return fmt.Errorf("grant: 条子为空")
+	}
+	if ownerUID == executorUID {
+		return nil
+	}
+	if ownerUID != 0 {
+		return fmt.Errorf("grant: 条子属于 %q,不能给 %q 用", ownerName, executorName)
+	}
+	if g.ForUser == "" {
+		return fmt.Errorf("grant: root 签的条子必须写明给谁(for_user),否则任何人都能拿去用")
+	}
+	if g.ForUser != executorName {
+		return fmt.Errorf("grant: 这张条子是给 %q 的,不是给 %q 的", g.ForUser, executorName)
 	}
 	return nil
 }
