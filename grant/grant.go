@@ -275,9 +275,9 @@ func Authorize(cfg *autonomy.Config, g *Grant, ownerUID uint32, ownerName string
 // 判定只信两样东西:文件属主(来自 stat,不可伪造)与条子里的 for_uid。JSON 里
 // 其它自报字段一律不认。
 //
-//	属主 == 执行者              → 自己的条子自己用
+//	属主 == 执行者               → 自己的条子自己用
 //	属主 == root 且 for_uid 匹配 → root 签给你
-//	属主 == root 且未绑定        → 拒(root 必须写明给谁)
+//	属主 == root 且未绑定        → 拒(root 必须写明给谁;root 自己也不行)
 //	属主 != root 且声明了 for_uid → 拒(非 root 属主改得了自己的文件,这句话不算数)
 //	其余                         → 拒(条子属于别人)
 //
@@ -294,19 +294,20 @@ func BindExecutor(g *Grant, ownerUID uint32, ownerName string, executorUID uint3
 	if ownerUID != 0 && g.ForUID != nil {
 		return fmt.Errorf("grant: 非 root 属主(%q)的条子不能指定执行者;绑定使用者只能由 root 签", ownerName)
 	}
-	if g.ForUID != nil {
+	if ownerUID == 0 {
+		// root 签的条子必须写明给谁:没写明的就是节点级通行证,谁都能拿去用。
+		if g.ForUID == nil {
+			return fmt.Errorf("grant: root 签的条子必须写明给谁(for_user),否则任何人都能拿去用")
+		}
 		if *g.ForUID != executorUID {
 			return fmt.Errorf("grant: 这张条子是给 %q(uid=%d)的,不是给 %q(uid=%d)的", g.ForUser, *g.ForUID, executorName, executorUID)
 		}
 		return nil
 	}
-	if ownerUID == executorUID {
-		return nil
-	}
-	if ownerUID != 0 {
+	if ownerUID != executorUID {
 		return fmt.Errorf("grant: 条子属于 %q,不能给 %q 用", ownerName, executorName)
 	}
-	return fmt.Errorf("grant: root 签的条子必须写明给谁(for_user),否则任何人都能拿去用")
+	return nil
 }
 
 // BoundExecutorUID 返回这张条子唯一合法的执行者 uid(供 `grant list` 找对账本)。
