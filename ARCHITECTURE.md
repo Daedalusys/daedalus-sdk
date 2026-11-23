@@ -21,7 +21,7 @@ Go 编译器的"同模块限可见"防护随之失效。安全边界因此从编
 | `state` | JSONL state cache (append-only, latest-value),观测态派生缓存 | plugins (`service`) |
 | `plugin` | Plugin manifest parsing and validation,Pack/Extract/Verify 与 zip-slip 防线 | core (`cmd/daedalus-{host,plugin-pack}`);plugins 不 import |
 | `pathguard` | Filesystem path sandboxing (symlink resolution, deny-list),前缀边界 + realpath | plugins (`fs`, `dupe`);`shell`/`blueprint` 不 import |
-| `shellpolicy` | Shell command policy (allow/deny patterns),15 命令 / 4 bin 目录权威实现 | plugins (`shell`, `blueprint`(post_check 白名单)) |
+| `shellpolicy` | Shell command policy (allow/deny patterns),16 命令 / 4 bin 目录权威实现 | plugins (`shell`, `blueprint`(post_check 白名单)) |
 | `pkgquery` | Package manager abstraction (DNF),rpm 优先、dnf repoquery 兜底 | core (`cmd/daedalus-tx/package_set.go`), plugins (`pkg`) |
 | `sysinfo` | System information collection,os-release / cpuinfo / meminfo / 网络只读探测 | plugins (`sysinfo`) |
 | `dirs` | XDG directory resolution,state/tx 根路径统一解析链 | core (`cmd/daedalus-tx`, `internal/tx` 共 3 处), sdk (`state`) |

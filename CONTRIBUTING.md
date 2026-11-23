@@ -17,7 +17,7 @@ daedalus-sdk/
 ├── audit/              # 哈希链审计库
 ├── policy/             # policy.toml 严格加载
 ├── pathguard/          # fs 路径校验
-├── shellpolicy/        # 15 命令 / 4 bin 目录 / 路径规则
+├── shellpolicy/        # 16 命令 / 4 bin 目录 / 路径规则
 ├── pkgquery/           # dnf/rpm 只读查询
 ├── sysinfo/            # os-release / cpuinfo / meminfo / 网络探测
 ├── plugin/             # manifest schema + Pack/Extract/Verify

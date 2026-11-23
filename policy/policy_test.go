@@ -558,12 +558,12 @@ func TestAllowedCommands_Replace(t *testing.T) {
 
 	// env 空 → 策略白名单副本;改动副本不得渗透策略本体。
 	got = policy.AllowedCommands(p, "")
-	if len(got) != 15 {
-		t.Fatalf("无 env 时应为策略 15 项, got %d", len(got))
+	if len(got) != 16 {
+		t.Fatalf("无 env 时应为策略 16 项, got %d", len(got))
 	}
 	delete(got, "df")
 	got["injected"] = struct{}{}
-	if again := policy.AllowedCommands(p, ""); len(again) != 15 {
+	if again := policy.AllowedCommands(p, ""); len(again) != 16 {
 		t.Error("副本改动渗透了策略本体")
 	} else if _, ok := again["df"]; !ok {
 		t.Error("副本改动导致 df 丢失")
@@ -584,15 +584,15 @@ func TestAllocCommands_ReadsEnv(t *testing.T) {
 
 // TestDefault_MatchesExistingConstants 是防双源漂移的钉子测试:
 // Default() 必须与 internal/shellpolicy、internal/pathguard 的
-// 既有硬编码常量逐项一致(15 命令 / 4 bin 目录 / 9 前缀 / 5 blocked /
+// 既有硬编码常量逐项一致(16 命令 / 4 bin 目录 / 9 前缀 / 5 blocked /
 // CLEAN_ENV / 30s / fs 3 目录 / 审计路径)。
 func TestDefault_MatchesExistingConstants(t *testing.T) {
 	d := policy.Default()
 
-	if len(d.Shell.AllowedCommands) != 15 || len(d.Shell.AllowedPathPrefixes) != 9 || len(d.Shell.BlockedPaths) != 5 {
+	if len(d.Shell.AllowedCommands) != 16 || len(d.Shell.AllowedPathPrefixes) != 9 || len(d.Shell.BlockedPaths) != 5 {
 		t.Fatalf("数量不符现状: %d/%d/%d", len(d.Shell.AllowedCommands), len(d.Shell.AllowedPathPrefixes), len(d.Shell.BlockedPaths))
 	}
-	if len(shellpolicy.DefaultAllowCommands) != 15 {
+	if len(shellpolicy.DefaultAllowCommands) != 16 {
 		t.Fatalf("shellpolicy 默认集数量异常: %d", len(shellpolicy.DefaultAllowCommands))
 	}
 	assertPolicyEqual(t, d, policy.Default(), "self") // 结构比较器的自反冒烟

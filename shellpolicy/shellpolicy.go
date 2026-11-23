@@ -33,11 +33,30 @@ const (
 // Timeout 是执行超时时长的 Duration 形式(30000ms)。
 var Timeout = time.Duration(TimeoutSeconds) * time.Second
 
-// DefaultAllowCommands 逐字对应 shell_server.ts 的 DEFAULT_ALLOW_COMMANDS,一字不可改动。
+// Outcome 词表是 shell_exec 结果的跨语言 wire 契约:Go 插件产出,copilot
+// (daedalus-core 的 plugin/copilot/exec.ts)消费。四态固定,新增需同步 TS 侧。
+const (
+	OutcomeOK           = "ok"
+	OutcomeRanAndFailed = "ran_and_failed"
+	OutcomeDenied       = "denied"
+	OutcomeTimeout      = "timeout"
+)
+
+// DeniedArgs 是按命令的拒绝参数表:这些参数会让命令不退出或行为不可预期,
+// 白名单命令仍需逐个挡掉。journalctl 的 -f/--follow 会挂住直到超时。
+var DeniedArgs = map[string][]string{
+	"journalctl": {"-f", "--follow"},
+}
+
+// DefaultAllowCommands 是 shell 只读诊断命令白名单:与 daedalus-core 的
+// policy.toml [shell].allowed_commands、plugin/copilot/policy.ts 冻结副本及
+// shell_server.ts 的 DEFAULT_ALLOW_COMMANDS 逐字对应,改一处必改其余各处。
+// journalctl 放行是巡检读 journal 查磁盘类故障的前提,缺失会让该类故障一律漏检。
 var DefaultAllowCommands = map[string]struct{}{
 	"df": {}, "ls": {}, "cat": {}, "pwd": {}, "uname": {},
 	"free": {}, "ps": {}, "uptime": {}, "whoami": {}, "ip": {},
 	"arch": {}, "hostname": {}, "date": {}, "ping": {}, "systemctl": {},
+	"journalctl": {},
 }
 
 var defaultPostCheckCommands = []string{"nginx", "haproxy", "psql", "redis-cli", "systemctl", "grep"}
@@ -251,6 +270,28 @@ func ValidateArg(arg string) error {
 	if IsPathLike(arg) {
 		_, err := ValidatePath(arg)
 		return err
+	}
+	return nil
+}
+
+// ValidateArgs 对一条 argv 做全量校验:先查 DeniedArgs 拒绝表,再逐个走
+// ValidateArg 的路径规则。命令名取基名,与 ValidateCommand 的解析一致。
+func ValidateArgs(command string, args []string) error {
+	base := command
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	for _, denied := range DeniedArgs[base] {
+		for _, arg := range args {
+			if arg == denied {
+				return fmt.Errorf("Argument '%s' is not allowed for command '%s'.", denied, base)
+			}
+		}
+	}
+	for _, arg := range args {
+		if err := ValidateArg(arg); err != nil {
+			return err
+		}
 	}
 	return nil
 }
