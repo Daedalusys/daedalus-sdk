@@ -55,22 +55,30 @@ func readUsageLines(t *testing.T, path string) []map[string]any {
 	return out
 }
 
-func TestUsageLogPath(t *testing.T) {
+func TestUsageLogPathFor(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DAEDALUS_TX_DIR", dir)
-	got, err := grant.UsageLogPath()
+	got, err := grant.UsageLogPathFor(1000)
 	if err != nil {
-		t.Fatalf("UsageLogPath 失败: %v", err)
+		t.Fatalf("UsageLogPathFor 失败: %v", err)
 	}
-	want := filepath.Join(dir, "grant-usage.jsonl")
+	want := filepath.Join(dir, "usage-1000.jsonl")
 	if got != want {
-		t.Fatalf("UsageLogPath = %q, 期望 %q", got, want)
+		t.Fatalf("UsageLogPathFor = %q, 期望 %q", got, want)
+	}
+	// 账本按执行者分文件:两个执行者必须是两份,否则第二个用户打不开第一份。
+	other, err := grant.UsageLogPathFor(1001)
+	if err != nil {
+		t.Fatalf("UsageLogPathFor(1001) 失败: %v", err)
+	}
+	if other == got {
+		t.Fatalf("两个执行者的账本路径必须不同: %q", got)
 	}
 }
 
 func TestUsageLogPathRejectsRelativeEnv(t *testing.T) {
 	t.Setenv("DAEDALUS_TX_DIR", "relative/tx")
-	_, err := grant.UsageLogPath()
+	_, err := grant.UsageLogPathFor(1000)
 	if !errors.Is(err, dirs.ErrEnvNotAbsolute) {
 		t.Fatalf("期望 ErrEnvNotAbsolute,实际: %v", err)
 	}
