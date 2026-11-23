@@ -7,9 +7,11 @@ allowed_path_prefixes = ["/tmp"]
 blocked_paths = ["/root"]
 clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
 timeout_ms = 5000
+max_output_bytes = 1048576
 
 [fs]
 allowed_dirs = ["/tmp"]
+max_read_bytes = 1048576
 
 [audit]
 log_path = "/tmp/daedalus-policy-test-audit.jsonl"

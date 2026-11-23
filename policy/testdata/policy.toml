@@ -39,9 +39,17 @@ clean_env = { PATH = "/usr/bin:/bin:/usr/sbin:/sbin", LANG = "C.UTF-8" }
 # 命令执行超时(毫秒;到期对整个进程组 SIGKILL,回传退出码 124)。
 timeout_ms = 30000
 
+# 命令输出上限(字节;stdout 与 stderr 各自计数,超出即截断)。
+# 无上限时单次调用即可产出数十 MiB 响应,直接撑爆 MCP 客户端的响应体上限。
+max_output_bytes = 1048576
+
 [fs]
 # 文件系统能力服务器可访问的目录白名单(3 项,逐字对齐 internal/pathguard.AllowedDirs)。
 allowed_dirs = ["/home", "/var/log", "/tmp"]
+
+# 单次文件读取上限(字节;超出即截断)。
+# 与 [shell].max_output_bytes 同理:整份大文件灌进响应同样会撑爆客户端。
+max_read_bytes = 1048576
 
 [audit]
 # 哈希链审计日志路径(运行时仍可被 DAEDALUS_AUDIT_LOG_PATH 环境变量覆盖)。

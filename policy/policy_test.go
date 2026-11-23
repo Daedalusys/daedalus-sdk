@@ -843,8 +843,10 @@ allowed_path_prefixes = ["/home"]
 blocked_paths = ["/etc/shadow"]
 clean_env = { PATH = "/usr/bin" }
 timeout_ms = 30000
+max_output_bytes = 1048576
 [fs]
 allowed_dirs = ["/home"]
+max_read_bytes = 1048576
 [audit]
 log_path = "/tmp/audit.jsonl"
 max_size_mb = 256
@@ -937,9 +939,11 @@ allowed_path_prefixes = ["/tmp"]
 blocked_paths = ["/root"]
 clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
 timeout_ms = 5000
+max_output_bytes = 1048576
 
 [fs]
 allowed_dirs = ["/tmp"]
+max_read_bytes = 1048576
 
 [audit]
 log_path = "/tmp/daedalus-policy-test-audit.jsonl"
@@ -1110,6 +1114,32 @@ func TestPolicy_Fleet_UnknownKeyRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "fleet.bogus") {
 		t.Errorf("报错未点名 fleet.bogus: %v", err)
+	}
+}
+
+// TestPolicy_OutputLimits_DriftWithRealToml 是两个输出上限键的三点漂移测试:
+// 仓库真实 policy.toml 必须与 Default() 逐项一致。任何修改 policy.toml /
+// Default() 单边的提交必须同步另一侧,否则此测试 fail-closed。
+func TestPolicy_OutputLimits_DriftWithRealToml(t *testing.T) {
+	t.Setenv(policy.EnvPolicyPath, "")
+	st, err := os.Stat(policy.ProductionPath)
+	if err == nil && !st.IsDir() {
+		t.Skipf("本机存在 %s,无法演练开发态回溯", policy.ProductionPath)
+	}
+	repoPolicy, err := policy.ResolvePath()
+	if err != nil {
+		t.Fatalf("开发态回溯未命中仓库 policy.toml: %v", err)
+	}
+	real, err := policy.Load(repoPolicy)
+	if err != nil {
+		t.Fatalf("镜像 policy.toml 未通过自身校验(含输出上限键): %v", err)
+	}
+	def := policy.Default()
+	if real.Shell.MaxOutputBytes != def.Shell.MaxOutputBytes {
+		t.Errorf("shell.max_output_bytes 漂移: %d vs %d", real.Shell.MaxOutputBytes, def.Shell.MaxOutputBytes)
+	}
+	if real.FS.MaxReadBytes != def.FS.MaxReadBytes {
+		t.Errorf("fs.max_read_bytes 漂移: %d vs %d", real.FS.MaxReadBytes, def.FS.MaxReadBytes)
 	}
 }
 
