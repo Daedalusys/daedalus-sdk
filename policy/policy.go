@@ -88,10 +88,14 @@ type Shell struct {
 	BlockedPaths        []string          `toml:"blocked_paths"`
 	CleanEnv            map[string]string `toml:"clean_env"`
 	TimeoutMs           int64             `toml:"timeout_ms"`
+	// MaxOutputBytes 是 stdout / stderr 各自的输出上限(字节;>0 有效,<=0 视为缺省,fail-closed)。
+	MaxOutputBytes int64 `toml:"max_output_bytes"`
 }
 
 type FS struct {
 	AllowedDirs []string `toml:"allowed_dirs"`
+	// MaxReadBytes 是 read_file 单次读取上限(字节;>0 有效,<=0 视为缺省,fail-closed)。
+	MaxReadBytes int64 `toml:"max_read_bytes"`
 }
 
 type Audit struct {
@@ -356,6 +360,12 @@ func (p *Policy) validate() error {
 	if p.Shell.TimeoutMs <= 0 {
 		missing = append(missing, "shell.timeout_ms")
 	}
+	if p.Shell.MaxOutputBytes <= 0 {
+		missing = append(missing, "shell.max_output_bytes")
+	}
+	if p.FS.MaxReadBytes <= 0 {
+		missing = append(missing, "fs.max_read_bytes")
+	}
 	if p.Audit.LogPath == "" {
 		missing = append(missing, "audit.log_path")
 	}
@@ -435,9 +445,14 @@ func Default() *Policy {
 				"LANG": "C.UTF-8",
 			},
 			TimeoutMs: 30000,
+			// 输出上限 1 MiB:够放下绝大多数诊断输出,又远低于 MCP 客户端的
+			// 响应体上限(单次调用不再撑爆连接)。
+			MaxOutputBytes: 1048576,
 		},
 		FS: FS{
 			AllowedDirs: []string{"/home", "/var/log", "/tmp"},
+			// 读取上限同为 1 MiB:整份大文件灌进响应同样会撑爆客户端。
+			MaxReadBytes: 1048576,
 		},
 		Audit: Audit{
 			LogPath:    "/var/log/daedalus/audit.jsonl",
