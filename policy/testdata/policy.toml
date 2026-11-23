@@ -21,8 +21,8 @@
 # =============================================================================
 
 [shell]
-# 命令基名白名单(15 项只读/诊断命令,逐字对齐 internal/shellpolicy.DefaultAllowCommands)。
-allowed_commands = ["df", "ls", "cat", "pwd", "uname", "free", "ps", "uptime", "whoami", "ip", "arch", "hostname", "date", "ping", "systemctl"]
+# 命令基名白名单(16 项只读/诊断命令,逐字对齐 internal/shellpolicy.DefaultAllowCommands)。
+allowed_commands = ["df", "ls", "cat", "pwd", "uname", "free", "ps", "uptime", "whoami", "ip", "arch", "hostname", "date", "ping", "systemctl", "journalctl"]
 
 # 允许命令所在的二进制目录(带 '/' 前缀的命令路径 realpath 后必须落于其中之一)。
 binary_dirs = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]

@@ -421,6 +421,7 @@ func Default() *Policy {
 			AllowedCommands: []string{
 				"df", "ls", "cat", "pwd", "uname", "free", "ps", "uptime",
 				"whoami", "ip", "arch", "hostname", "date", "ping", "systemctl",
+				"journalctl",
 			},
 			BinaryDirs: []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"},
 			AllowedPathPrefixes: []string{
