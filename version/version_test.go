@@ -1,5 +1,6 @@
-// version_test.go 锁定「发布 tag 必须与 version.Version 一致」这道门禁的存在。
+// version_test.go 锁定两件事:发布 tag 与 version.Version 一致(门禁存在),以及本次发布的目标版本。
 // 常量与 tag 漂过一次(v0.5.0 发布时常量还停在 0.4.0),所以门禁本身要被测到。
+// 目标版本钉在 TestVersionConstantPinsReleaseTarget 里,发版前常规 CI 就能拦下漏改。
 package version
 
 import (
