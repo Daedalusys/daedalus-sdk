@@ -289,7 +289,7 @@ service AgentService {
   rpc CallTool(CallToolRequest) returns (CallToolResponse);
 }
 
-// ============== 只读工具调用面 ==============
+// ============== 工具调用面 ==============
 
 // ToolDescriptor 描述节点上一个可远程调用的 MCP 工具。
 message ToolDescriptor {
@@ -308,7 +308,7 @@ message ListToolsResponse {
   uint64 audit_seq = 2; // 与节点审计链对齐的序号
 }
 
-// CallToolRequest 调用一个只读工具。节点侧自行判定是否放行。
+// CallToolRequest 调用一个工具;是否放行由节点侧判定,协议本身不保证只读。
 message CallToolRequest {
   string plugin_id = 1;
   string tool_name = 2;
