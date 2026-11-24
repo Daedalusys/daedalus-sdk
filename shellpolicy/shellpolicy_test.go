@@ -16,6 +16,7 @@ func TestConstantsPinDenoSource(t *testing.T) {
 	wantCommands := []string{
 		"df", "ls", "cat", "pwd", "uname", "free", "ps", "uptime",
 		"whoami", "ip", "arch", "hostname", "date", "ping", "systemctl",
+		"journalctl",
 	}
 	if len(DefaultAllowCommands) != len(wantCommands) {
 		t.Fatalf("DEFAULT_ALLOW_COMMANDS 数量漂移: got %d, want %d", len(DefaultAllowCommands), len(wantCommands))
@@ -58,10 +59,10 @@ func TestConstantsPinDenoSource(t *testing.T) {
 }
 
 func TestResolveAllowCommands(t *testing.T) {
-	t.Run("缺省用默认 15 项", func(t *testing.T) {
+	t.Run("缺省用默认 16 项", func(t *testing.T) {
 		got := ResolveAllowCommands("")
-		if len(got) != 15 {
-			t.Fatalf("默认白名单数量 = %d, want 15", len(got))
+		if len(got) != 16 {
+			t.Fatalf("默认白名单数量 = %d, want 16", len(got))
 		}
 	})
 	t.Run("环境变量整体替换而非并集", func(t *testing.T) {
@@ -94,6 +95,36 @@ func TestResolveAllowCommands(t *testing.T) {
 	})
 }
 
+// TestDefaultAllowCommands_JournalctlPresent 锁定 journalctl 在默认白名单内:
+// 巡检需读 journal 查磁盘类故障,缺了它该类故障一律漏检。
+func TestDefaultAllowCommands_JournalctlPresent(t *testing.T) {
+	if _, ok := DefaultAllowCommands["journalctl"]; !ok {
+		t.Fatal("journalctl 不在默认白名单里")
+	}
+	if len(DefaultAllowCommands) != 16 {
+		t.Errorf("默认白名单项数漂移: got %d, want 16", len(DefaultAllowCommands))
+	}
+}
+
+// TestOutcomeConstants 锁定 shell_exec 的 outcome 词表:四态固定,是 Go 插件
+// 与 copilot 之间的跨语言 wire 契约,任何一侧改动必须同步另一侧。
+func TestOutcomeConstants(t *testing.T) {
+	want := map[string]string{
+		"ok":             OutcomeOK,
+		"ran_and_failed": OutcomeRanAndFailed,
+		"denied":         OutcomeDenied,
+		"timeout":        OutcomeTimeout,
+	}
+	if len(want) != 4 {
+		t.Fatalf("outcome 词表项数异常: %d, want 4", len(want))
+	}
+	for literal, got := range want {
+		if got != literal {
+			t.Errorf("outcome 常量值 = %q, want %q", got, literal)
+		}
+	}
+}
+
 // TestPostCheckAllowCommands 锁定蓝图 post_check 命令白名单:出厂默认、与主白名单
 // DefaultAllowCommands 相互独立、IsPostCheckAllowed 命中/未命中语义。
 // (orchestrator 修复:systemctl/grep 是合法校验命令,post_check 脚本
@@ -112,9 +143,9 @@ func TestPostCheckAllowCommands(t *testing.T) {
 		}
 	})
 	t.Run("与主白名单相互独立", func(t *testing.T) {
-		// post_check 命令不得并入主白名单(主白名单仍是 15 项)。
-		if len(DefaultAllowCommands) != 15 {
-			t.Fatalf("主白名单被污染: 数量 = %d, want 15(必须保持 15 项)",
+		// post_check 命令不得并入主白名单(主白名单仍是 16 项)。
+		if len(DefaultAllowCommands) != 16 {
+			t.Fatalf("主白名单被污染: 数量 = %d, want 16(必须保持 16 项)",
 				len(DefaultAllowCommands))
 		}
 		for _, c := range []string{"nginx", "haproxy", "psql", "redis-cli"} {
@@ -342,6 +373,35 @@ func TestValidateArg(t *testing.T) {
 				t.Errorf("ValidateArg(%q) 错误 %q 不含 %q", tc.arg, err, tc.wantError)
 			}
 		})
+	}
+}
+
+// TestValidateArgs_RejectsJournalctlFollow 锁定拒绝参数表:journalctl 的
+// -f/--follow 会挂住直到超时,白名单命令仍须逐个挡掉。
+func TestValidateArgs_RejectsJournalctlFollow(t *testing.T) {
+	if err := ValidateArgs("journalctl", []string{"-f"}); err == nil {
+		t.Fatal("journalctl -f 必须被拒")
+	}
+	if err := ValidateArgs("journalctl", []string{"--follow"}); err == nil {
+		t.Fatal("journalctl --follow 必须被拒")
+	}
+	if err := ValidateArgs("journalctl", []string{"-p", "err", "-n", "50"}); err != nil {
+		t.Fatalf("journalctl 常规只读参数不应被拒: %v", err)
+	}
+}
+
+// TestValidateArgs_PassesThroughArgValidation 锁定 ValidateArgs 的两段语义:
+// 拒绝表命中即拒,其余参数仍走 ValidateArg 的路径规则(不因新入口而放行)。
+func TestValidateArgs_PassesThroughArgValidation(t *testing.T) {
+	if err := ValidateArgs("journalctl", []string{"--file=/etc/shadow"}); err == nil {
+		t.Fatal("受阻路径参数必须被拒")
+	}
+	if err := ValidateArgs("journalctl", []string{"-u", "root"}); err != nil {
+		t.Fatalf("普通参数不应被拒: %v", err)
+	}
+	// 命令名取基名:带路径的调用同样命中拒绝表。
+	if err := ValidateArgs("/usr/bin/journalctl", []string{"-f"}); err == nil {
+		t.Fatal("带路径的 journalctl -f 必须被拒")
 	}
 }
 

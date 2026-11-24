@@ -17,7 +17,7 @@ SDK 包由 `daedalus-core/` 与 `daedalus-plugins/` 经 `replace` 指令本地�
 | `audit/` | 哈希链审计库(genesis `0`*64、syscall.Flock、sha256 链、Python 金样字节级兼容) | `daedalus-core/cmd/daedalus-audit`、copilot `audit.ts`、宿主 |
 | `policy/` | policy.toml 严格加载(ErrNotFound 哨兵 / LoadOrDefault / ALLOW_COMMANDS REPLACE) | 全部能力服务器、`76-daedalus-plugin-gen.sh` 构建期握手 |
 | `pathguard/` | fs 路径校验(ALLOWED_DIRS 前缀边界、空字节、realpath) | `daedalus-plugins/fs` |
-| `shellpolicy/` | 15 命令 / 4 bin 目录 / 路径规则权威实现(CLEAN_ENV、30s、rc 126/124) | `daedalus-plugins/shell`、copilot `policy.ts` 冻结副本(双向同步义务) |
+| `shellpolicy/` | 16 命令 / 4 bin 目录 / 路径规则权威实现(CLEAN_ENV、30s、rc 126/124) | `daedalus-plugins/shell`、copilot `policy.ts` 冻结副本(双向同步义务) |
 | `pkgquery/` | dnf/rpm 只读查询(rpm 优先、dnf repoquery 兜底) | `daedalus-plugins/pkg` |
 | `sysinfo/` | os-release / cpuinfo / meminfo / 网络只读探测 | `daedalus-plugins/sysinfo` |
 | `plugin/` | manifest schema 校验 + Pack/Extract/Verify/VerifyDir(zip-slip 九道防线) | `daedalus-core/cmd/daedalus-{host,plugin-pack}` |

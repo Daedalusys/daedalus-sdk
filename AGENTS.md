@@ -21,7 +21,7 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 ├── grant/         # 变更条子的严格解析 / 签发者授权判定 / 用量记账 (单向依赖 autonomy)
 ├── pending/       # 第三档人工闸门的跨仓线上契约 (待办/批准形状 / 严格解析 / id 派生 / argv 指纹)
 ├── pathguard/     # fs 路径校验 (读 ValidatePath + 写二档 ValidateWritePath)
-├── shellpolicy/   # 15 命令 / 4 bin 目录 / 路径规则权威实现
+├── shellpolicy/   # 16 命令 / 4 bin 目录 / 路径规则权威实现
 ├── pkgquery/      # dnf/rpm 只读查询 (rpm 优先 / dnf repoquery 兜底)
 ├── sysinfo/       # os-release / cpuinfo / meminfo / 网络只读探测
 ├── plugin/        # manifest schema + Pack/Extract/Verify/VerifyDir (zip-slip 九道防线)
@@ -46,7 +46,7 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 | 单次性确认令牌 | `confirmation/` | `GenerateConfirmToken` / `VerifyConfirmToken`;15 分钟过期;blueprint 薄包装保留 |
 | 策略加载与默认值 | `policy/` | 三点防漂移链:policy.toml ↔ `policy.Default()` ↔ shellpolicy/pathguard 常量 |
 | fs 路径白名单边界 | `pathguard/` | 防 `/home` 匹配 `/home2` (前缀边界 + realpath);写二档 `ValidateWritePath` 额外拒写只读系统目录 + 敏感文件 |
-| Shell 白名单与 argv 规则 | `shellpolicy/` | 15 命令 / 4 bin 目录;`RegisterBlueprintsPostCheckSource` 钩子 |
+| Shell 白名单与 argv 规则 | `shellpolicy/` | 16 命令 / 4 bin 目录;拒绝参数表 `DeniedArgs` + `ValidateArgs`;outcome 词表;`RegisterBlueprintsPostCheckSource` 钩子 |
 | 插件 manifest + zip 打包 | `plugin/` | schema 校验 + zip-slip 九道防线 + checksums 注入 |
 | 对象模型类型 + Kind 注册 | `objectmodel/` | `Kind` 封闭枚举 + `kindRegistry`;新增 Kind 三步走 |
 | 蓝图 schema + 渲染 | `blueprint/` | jsonschema-go 预编译 + confirm_token(15 分钟过期) |
@@ -61,7 +61,8 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 | `audit.Verify` / `audit.Scan` | `audit/verify.go` `audit/scan.go` | 哈希链验证 / 扫描 |
 | `confirmation.ConfirmToken` / `GenerateConfirmToken` / `VerifyConfirmToken` | `confirmation/token.go` | 单次有效确认令牌;TTL=15 分钟;blueprint / disk-clean / organize 共用契约 |
 | `policy.Load` / `policy.Default` | `policy/policy.go` | 严格加载 / 缺失默认 fail-closed 拒启(回退 Default 需 `DAEDALUS_POLICY_MODE=development` opt-in,drift-tested 一致);含 `[confirmation]` + `[diskclean]` 段 |
-| `shellpolicy.AllowCommands` | `shellpolicy/allow.go` | 15 命令权威实现;CLEAN_ENV + 30s + rc 126/124 |
+| `shellpolicy.AllowCommands` | `shellpolicy/allow.go` | 16 命令权威实现;CLEAN_ENV + 30s + rc 126/124 |
+| `shellpolicy.ValidateArgs` / `DeniedArgs` / outcome 词表 | `shellpolicy/shellpolicy.go` | 按命令拒绝参数表(journalctl `-f`/`--follow` 会挂住);outcome 四态 wire 契约(Go 插件 ↔ copilot `exec.ts`) |
 | `pathguard.ValidatePath` / `pathguard.ValidateWritePath` | `pathguard/pathguard.go` | 读档校验(ALLOWED_DIRS 前缀 + realpath 防逃逸);写档二档额外拒写只读系统目录(`/proc`/`/sys`/`/boot`/`/usr`/`/etc`/`/var/lib/rpm`)+ 敏感文件通配(`/etc/shadow`/`/etc/passwd`/`/etc/sudoers*`/`/etc/pam.d/`)+ 强制完整 realpath |
 | `plugin.Manifest` / `plugin.Pack` | `plugin/manifest.go` `plugin/pack.go` | 规范化自摘要 + 逐条目 sha256 + zip-slip 防线 |
 | `objectmodel.Resource` / `Kind` / `AllKinds` | `objectmodel/objectmodel.go` | 三字段元组 (kind/name/desired_state);Kind 封闭枚举 8 类 + 漂移金丝雀锁 |

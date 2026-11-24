@@ -558,12 +558,12 @@ func TestAllowedCommands_Replace(t *testing.T) {
 
 	// env 空 → 策略白名单副本;改动副本不得渗透策略本体。
 	got = policy.AllowedCommands(p, "")
-	if len(got) != 15 {
-		t.Fatalf("无 env 时应为策略 15 项, got %d", len(got))
+	if len(got) != 16 {
+		t.Fatalf("无 env 时应为策略 16 项, got %d", len(got))
 	}
 	delete(got, "df")
 	got["injected"] = struct{}{}
-	if again := policy.AllowedCommands(p, ""); len(again) != 15 {
+	if again := policy.AllowedCommands(p, ""); len(again) != 16 {
 		t.Error("副本改动渗透了策略本体")
 	} else if _, ok := again["df"]; !ok {
 		t.Error("副本改动导致 df 丢失")
@@ -584,15 +584,15 @@ func TestAllocCommands_ReadsEnv(t *testing.T) {
 
 // TestDefault_MatchesExistingConstants 是防双源漂移的钉子测试:
 // Default() 必须与 internal/shellpolicy、internal/pathguard 的
-// 既有硬编码常量逐项一致(15 命令 / 4 bin 目录 / 9 前缀 / 5 blocked /
+// 既有硬编码常量逐项一致(16 命令 / 4 bin 目录 / 9 前缀 / 5 blocked /
 // CLEAN_ENV / 30s / fs 3 目录 / 审计路径)。
 func TestDefault_MatchesExistingConstants(t *testing.T) {
 	d := policy.Default()
 
-	if len(d.Shell.AllowedCommands) != 15 || len(d.Shell.AllowedPathPrefixes) != 9 || len(d.Shell.BlockedPaths) != 5 {
+	if len(d.Shell.AllowedCommands) != 16 || len(d.Shell.AllowedPathPrefixes) != 9 || len(d.Shell.BlockedPaths) != 5 {
 		t.Fatalf("数量不符现状: %d/%d/%d", len(d.Shell.AllowedCommands), len(d.Shell.AllowedPathPrefixes), len(d.Shell.BlockedPaths))
 	}
-	if len(shellpolicy.DefaultAllowCommands) != 15 {
+	if len(shellpolicy.DefaultAllowCommands) != 16 {
 		t.Fatalf("shellpolicy 默认集数量异常: %d", len(shellpolicy.DefaultAllowCommands))
 	}
 	assertPolicyEqual(t, d, policy.Default(), "self") // 结构比较器的自反冒烟
@@ -843,8 +843,10 @@ allowed_path_prefixes = ["/home"]
 blocked_paths = ["/etc/shadow"]
 clean_env = { PATH = "/usr/bin" }
 timeout_ms = 30000
+max_output_bytes = 1048576
 [fs]
 allowed_dirs = ["/home"]
+max_read_bytes = 1048576
 [audit]
 log_path = "/tmp/audit.jsonl"
 max_size_mb = 256
@@ -937,9 +939,11 @@ allowed_path_prefixes = ["/tmp"]
 blocked_paths = ["/root"]
 clean_env = { PATH = "/usr/bin:/bin", LANG = "C" }
 timeout_ms = 5000
+max_output_bytes = 1048576
 
 [fs]
 allowed_dirs = ["/tmp"]
+max_read_bytes = 1048576
 
 [audit]
 log_path = "/tmp/daedalus-policy-test-audit.jsonl"
@@ -1110,6 +1114,32 @@ func TestPolicy_Fleet_UnknownKeyRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "fleet.bogus") {
 		t.Errorf("报错未点名 fleet.bogus: %v", err)
+	}
+}
+
+// TestPolicy_OutputLimits_DriftWithRealToml 是两个输出上限键的三点漂移测试:
+// 仓库真实 policy.toml 必须与 Default() 逐项一致。任何修改 policy.toml /
+// Default() 单边的提交必须同步另一侧,否则此测试 fail-closed。
+func TestPolicy_OutputLimits_DriftWithRealToml(t *testing.T) {
+	t.Setenv(policy.EnvPolicyPath, "")
+	st, err := os.Stat(policy.ProductionPath)
+	if err == nil && !st.IsDir() {
+		t.Skipf("本机存在 %s,无法演练开发态回溯", policy.ProductionPath)
+	}
+	repoPolicy, err := policy.ResolvePath()
+	if err != nil {
+		t.Fatalf("开发态回溯未命中仓库 policy.toml: %v", err)
+	}
+	real, err := policy.Load(repoPolicy)
+	if err != nil {
+		t.Fatalf("镜像 policy.toml 未通过自身校验(含输出上限键): %v", err)
+	}
+	def := policy.Default()
+	if real.Shell.MaxOutputBytes != def.Shell.MaxOutputBytes {
+		t.Errorf("shell.max_output_bytes 漂移: %d vs %d", real.Shell.MaxOutputBytes, def.Shell.MaxOutputBytes)
+	}
+	if real.FS.MaxReadBytes != def.FS.MaxReadBytes {
+		t.Errorf("fs.max_read_bytes 漂移: %d vs %d", real.FS.MaxReadBytes, def.FS.MaxReadBytes)
 	}
 }
 
