@@ -1637,7 +1637,7 @@ func (x *ListToolsResponse) GetAuditSeq() uint64 {
 	return 0
 }
 
-// CallToolRequest 调用一个只读工具。节点侧自行判定是否放行。
+// CallToolRequest 调用一个工具;是否放行由节点侧判定,协议本身不保证只读。
 type CallToolRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PluginId      string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
