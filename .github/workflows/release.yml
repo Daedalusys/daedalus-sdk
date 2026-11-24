@@ -61,6 +61,22 @@ jobs:
         # 缺 syft 时 goreleaser 会在 SBOM 步直接失败。
         uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
 
+      - name: Version 常量与 tag 一致
+        # 常量漂移过一次:v0.5.0 发布时 version.Version 还停在 0.4.0,十个插件
+        # 二进制自报 0.4.0。这道门禁让「tag 与常量不一致」当场失败,而不是
+        # 等到有人在握手里读出版本号才发现。
+        # 仅 tag 推送时跑:workflow_dispatch 手发没有 v-tag,比不了。
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          got="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' version/version.go)"
+          want="${GITHUB_REF_NAME#v}"
+          if [ "$got" != "$want" ]; then
+            echo "FAIL: version.Version=$got,发布 tag 是 v$want" >&2
+            exit 1
+          fi
+          echo "OK: version.Version=$got 与 tag v$want 一致"
+
       - name: Run GoReleaser
         # goreleaser 产出:source tarball + SBOM(syft),并创建 GitHub release
         # 上传全部资产。--clean 清掉上一轮 dist/ 残留,保证可复现。

@@ -464,3 +464,48 @@ func TestNormalizePath(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateArgs_TextOptionValuesAreNotPaths 锁定「取值是文本的选项」豁免:
+// journalctl 的 -g/--grep 取值是正则,含 '/' 也不是路径,不该被 pathguard 拦。
+func TestValidateArgs_TextOptionValuesAreNotPaths(t *testing.T) {
+	ok := [][]string{
+		{"-g", "I/O error"},
+		{"--grep", "I/O error|dev/vdb"},
+		{"--grep=out of memory"},
+		{"-gI/O error"},
+		{"-p", "err", "-g", "I/O error"},
+		{"-g", ""},
+		{"-g"},
+	}
+	for _, args := range ok {
+		if err := ValidateArgs("journalctl", args); err != nil {
+			t.Errorf("ValidateArgs(journalctl, %q) 意外失败: %v", args, err)
+		}
+	}
+}
+
+// TestValidateArgs_TextOptionExemptionIsNarrow 锁定豁免的边界:只覆盖被点名的
+// 选项取值,其余路径参数、别的命令、拒绝表都不受影响。
+// 用例一律用绝对受阻路径(/etc/shadow):相对路径的判定结果取决于测试进程的
+// cwd,CI 在 /home/runner 下跑,`../etc/passwd` 会落进 /home 白名单,用例会假绿。
+func TestValidateArgs_TextOptionExemptionIsNarrow(t *testing.T) {
+	denied := []struct {
+		name string
+		cmd  string
+		args []string
+	}{
+		{"同 argv 里的文件参数", "journalctl", []string{"-g", "I/O error", "--file=/etc/shadow"}},
+		{"位置参数是路径", "journalctl", []string{"-g", "x", "/etc/shadow"}},
+		{"等号形式换了个选项名", "journalctl", []string{"--grep-file=/etc/shadow"}},
+		{"真文件选项", "journalctl", []string{"--file=/etc/shadow"}},
+		{"豁免不跨命令", "cat", []string{"-g", "/etc/shadow"}},
+		{"拒绝表优先", "journalctl", []string{"-g", "I/O error", "-f"}},
+	}
+	for _, tc := range denied {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateArgs(tc.cmd, tc.args); err == nil {
+				t.Fatalf("ValidateArgs(%q, %q) 意外通过", tc.cmd, tc.args)
+			}
+		})
+	}
+}

@@ -62,7 +62,7 @@ daedalus-sdk/                          # module github.com/Daedalusys/daedalus-s
 | `confirmation.ConfirmToken` / `GenerateConfirmToken` / `VerifyConfirmToken` | `confirmation/token.go` | 单次有效确认令牌;TTL=15 分钟;blueprint / disk-clean / organize 共用契约 |
 | `policy.Load` / `policy.Default` | `policy/policy.go` | 严格加载 / 缺失默认 fail-closed 拒启(回退 Default 需 `DAEDALUS_POLICY_MODE=development` opt-in,drift-tested 一致);含 `[confirmation]` + `[diskclean]` 段 |
 | `shellpolicy.AllowCommands` | `shellpolicy/allow.go` | 16 命令权威实现;CLEAN_ENV + 30s + rc 126/124 |
-| `shellpolicy.ValidateArgs` / `DeniedArgs` / outcome 词表 | `shellpolicy/shellpolicy.go` | 按命令拒绝参数表(journalctl `-f`/`--follow` 会挂住);outcome 四态 wire 契约(Go 插件 ↔ copilot `exec.ts`) |
+| `shellpolicy.ValidateArgs` / `DeniedArgs` / outcome 词表 | `shellpolicy/shellpolicy.go` | 按命令拒绝参数表(journalctl `-f`/`--follow` 会挂住)+ 取值非路径的选项豁免表(`journalctl -g`/`--grep` 是正则,含 `/` 也不当路径);outcome 四态 wire 契约(Go 插件 ↔ copilot `exec.ts`) |
 | `pathguard.ValidatePath` / `pathguard.ValidateWritePath` | `pathguard/pathguard.go` | 读档校验(ALLOWED_DIRS 前缀 + realpath 防逃逸);写档二档额外拒写只读系统目录(`/proc`/`/sys`/`/boot`/`/usr`/`/etc`/`/var/lib/rpm`)+ 敏感文件通配(`/etc/shadow`/`/etc/passwd`/`/etc/sudoers*`/`/etc/pam.d/`)+ 强制完整 realpath |
 | `plugin.Manifest` / `plugin.Pack` | `plugin/manifest.go` `plugin/pack.go` | 规范化自摘要 + 逐条目 sha256 + zip-slip 防线 |
 | `objectmodel.Resource` / `Kind` / `AllKinds` | `objectmodel/objectmodel.go` | 三字段元组 (kind/name/desired_state);Kind 封闭枚举 8 类 + 漂移金丝雀锁 |

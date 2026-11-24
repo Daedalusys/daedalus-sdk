@@ -274,6 +274,45 @@ func ValidateArg(arg string) error {
 	return nil
 }
 
+// nonPathOptionValues 是「取值是文本、不做路径校验」的选项豁免表,按命令分组。
+// 只收那些取值不会被命令当成文件去打开的选项:journalctl 的 -g/--grep 取值
+// 是正则表达式,journalctl 只拿它做文本匹配,不产生文件系统访问。
+//
+// 为什么需要它:IsPathLike 把任何含 '/' 的参数都当路径,而日志里"I/O error"
+// "/dev/vdb" 这类字样极常见 —— 不豁免的话,journalctl 的按关键字过滤不可用。
+//
+// 边界:豁免只作用于该选项的取值本身,同一 argv 里的其他路径参数照旧校验;
+// 不在本表里的选项(--file 等真·文件参数)仍走路径规则。
+var nonPathOptionValues = map[string]map[string]struct{}{
+	"journalctl": {"-g": {}, "--grep": {}},
+}
+
+// matchNonPathFlag 判断 arg 是否是豁免表里的选项:
+// 独立形式("-g")返回 (true, true) —— 取值是下一个参数;
+// 等号形式("--grep=PATTERN")与短选项粘连形式("-gPATTERN")返回 (true, false)。
+func matchNonPathFlag(flags map[string]struct{}, arg string) (matched bool, consumesNext bool) {
+	if len(flags) == 0 {
+		return false, false
+	}
+	if _, ok := flags[arg]; ok {
+		return true, true
+	}
+	if k, _, found := strings.Cut(arg, "="); found {
+		if _, ok := flags[k]; ok {
+			return true, false
+		}
+	}
+	for flag := range flags {
+		// 只把单横线短选项当粘连形式:"-gPATTERN";长选项("--grep")必须靠
+		// "=" 分隔,否则 "--grep-file" 会被前缀误匹配。
+		if len(flag) == 2 && flag[0] == '-' && flag[1] != '-' &&
+			strings.HasPrefix(arg, flag) && len(arg) > len(flag) {
+			return true, false
+		}
+	}
+	return false, false
+}
+
 // ValidateArgs 对一条 argv 做全量校验:先查 DeniedArgs 拒绝表,再逐个走
 // ValidateArg 的路径规则。命令名取基名,与 ValidateCommand 的解析一致。
 func ValidateArgs(command string, args []string) error {
@@ -288,7 +327,17 @@ func ValidateArgs(command string, args []string) error {
 			}
 		}
 	}
+	flags := nonPathOptionValues[base]
+	skipNext := false
 	for _, arg := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if matched, consumesNext := matchNonPathFlag(flags, arg); matched {
+			skipNext = consumesNext
+			continue
+		}
 		if err := ValidateArg(arg); err != nil {
 			return err
 		}
