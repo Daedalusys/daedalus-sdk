@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+// TestVersionConstantPinsReleaseTarget 把「本次要发的版本」钉在测试里。
+// release.yml 的比对只在推 tag 时生效,常量漏改要等 tag 上去才炸;这条断言让
+// 发版前的常规 CI 当场变红。
+func TestVersionConstantPinsReleaseTarget(t *testing.T) {
+	const want = "0.6.0"
+	if Version != want {
+		t.Errorf("version.Version=%q,期望 %q", Version, want)
+	}
+}
+
 func TestReleaseWorkflowGuardsTagAgainstVersionConstant(t *testing.T) {
 	data, err := os.ReadFile("../.github/workflows/release.yml")
 	if err != nil {
