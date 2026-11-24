@@ -1,5 +1,5 @@
 // agent_proto_test.go 守护 agent.v1 的线上契约:RPC 方法表与消息的 wire 往返。
-// 断言一律走真 marshal/unmarshal —— 只读回结构体字面量的字段挡不住字段号或 tag 写错。
+// 一律走真 marshal/unmarshal;往返只证明收发自洽,字段号/tag 需单独钉。
 // 协议只承载传输,是否放行由节点侧判定;对端实现见 daedalus-agent 仓与 AGENTS.md。
 package agentv1_test
 
@@ -12,7 +12,7 @@ import (
 
 // AgentService 的线上方法表必须暴露工具调用面。守护的是 proto 契约本身:
 // service 块里的 RPC 一旦被误删,控制面编译期能过但运行期才发现。
-func TestAgentService_ExposesReadOnlyToolRPCs(t *testing.T) {
+func TestAgentService_ExposesToolRPCs(t *testing.T) {
 	got := map[string]bool{}
 	for _, m := range agentv1.AgentService_ServiceDesc.Methods {
 		got[m.MethodName] = true
