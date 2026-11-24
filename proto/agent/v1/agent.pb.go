@@ -3,7 +3,7 @@
 // Spec: docs/superpowers/specs/2026-10-17-fleet-control-plane-design.md v3.1
 //   (§4.4 wire protocol, §7.3 C3 cert grace 1h, §6 B5 best-effort rollback)
 //
-// Six RPCs:
+// Eight RPCs:
 //
 //   Register          — agent上线,响应带 snapshot_capability 字段
 //   Heartbeat         — 保活 + pending intents 通知
@@ -11,6 +11,8 @@
 //   SnapshotRequest   — 控制面要求 agent 立刻 snapshot
 //   ReportStatus      — 审计事件回报(本地 JSONL 哈希链 → 控制面)
 //   RollbackIntent    — package/service 回滚(PLAN → 人审 → APPLY)
+//   ListTools         — 列出节点上允许远程调用的工具
+//   CallTool          — 调用一个工具(入参原样透传给插件)
 //
 // Transport: gRPC over mTLS, control plane 主动 outbound, agent inbound
 // listen 单端口(spec §4.4). cert 短 TTL 默认 24h, grace 1h(§7.3 C3).
@@ -1469,6 +1471,301 @@ func (x *RollbackIntentResponse) GetAuditSeq() uint64 {
 	return 0
 }
 
+// ToolDescriptor 描述节点上一个可远程调用的 MCP 工具。
+type ToolDescriptor struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	PluginId        string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"` // 如 "daedalus.shell"
+	ToolName        string                 `protobuf:"bytes,2,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"` // 如 "shell_exec"
+	Description     string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	InputSchemaJson string                 `protobuf:"bytes,4,opt,name=input_schema_json,json=inputSchemaJson,proto3" json:"input_schema_json,omitempty"` // MCP tool 的 JSON Schema
+	ReadOnly        bool                   `protobuf:"varint,5,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`                       // 插件自报的 ToolAnnotations.ReadOnlyHint
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ToolDescriptor) Reset() {
+	*x = ToolDescriptor{}
+	mi := &file_agent_v1_agent_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolDescriptor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolDescriptor) ProtoMessage() {}
+
+func (x *ToolDescriptor) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolDescriptor.ProtoReflect.Descriptor instead.
+func (*ToolDescriptor) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ToolDescriptor) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *ToolDescriptor) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
+func (x *ToolDescriptor) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *ToolDescriptor) GetInputSchemaJson() string {
+	if x != nil {
+		return x.InputSchemaJson
+	}
+	return ""
+}
+
+func (x *ToolDescriptor) GetReadOnly() bool {
+	if x != nil {
+		return x.ReadOnly
+	}
+	return false
+}
+
+// ListToolsRequest 空请求:列出该节点允许被控制面远程调用的全部工具。
+type ListToolsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListToolsRequest) Reset() {
+	*x = ListToolsRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListToolsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListToolsRequest) ProtoMessage() {}
+
+func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListToolsRequest.ProtoReflect.Descriptor instead.
+func (*ListToolsRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{16}
+}
+
+type ListToolsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tools         []*ToolDescriptor      `protobuf:"bytes,1,rep,name=tools,proto3" json:"tools,omitempty"`
+	AuditSeq      uint64                 `protobuf:"varint,2,opt,name=audit_seq,json=auditSeq,proto3" json:"audit_seq,omitempty"` // 与节点审计链对齐的序号
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListToolsResponse) Reset() {
+	*x = ListToolsResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListToolsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListToolsResponse) ProtoMessage() {}
+
+func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListToolsResponse.ProtoReflect.Descriptor instead.
+func (*ListToolsResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ListToolsResponse) GetTools() []*ToolDescriptor {
+	if x != nil {
+		return x.Tools
+	}
+	return nil
+}
+
+func (x *ListToolsResponse) GetAuditSeq() uint64 {
+	if x != nil {
+		return x.AuditSeq
+	}
+	return 0
+}
+
+// CallToolRequest 调用一个只读工具。节点侧自行判定是否放行。
+type CallToolRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PluginId      string                 `protobuf:"bytes,1,opt,name=plugin_id,json=pluginId,proto3" json:"plugin_id,omitempty"`
+	ToolName      string                 `protobuf:"bytes,2,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	ArgumentsJson string                 `protobuf:"bytes,3,opt,name=arguments_json,json=argumentsJson,proto3" json:"arguments_json,omitempty"` // MCP tool 的入参,原样透传给插件
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CallToolRequest) Reset() {
+	*x = CallToolRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CallToolRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CallToolRequest) ProtoMessage() {}
+
+func (x *CallToolRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CallToolRequest.ProtoReflect.Descriptor instead.
+func (*CallToolRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *CallToolRequest) GetPluginId() string {
+	if x != nil {
+		return x.PluginId
+	}
+	return ""
+}
+
+func (x *CallToolRequest) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
+func (x *CallToolRequest) GetArgumentsJson() string {
+	if x != nil {
+		return x.ArgumentsJson
+	}
+	return ""
+}
+
+type CallToolResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	IsError       bool                   `protobuf:"varint,1,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`            // 插件自报的业务错误
+	ContentJson   string                 `protobuf:"bytes,2,opt,name=content_json,json=contentJson,proto3" json:"content_json,omitempty"` // MCP tool 的返回内容
+	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	AuditSeq      uint64                 `protobuf:"varint,4,opt,name=audit_seq,json=auditSeq,proto3" json:"audit_seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CallToolResponse) Reset() {
+	*x = CallToolResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CallToolResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CallToolResponse) ProtoMessage() {}
+
+func (x *CallToolResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CallToolResponse.ProtoReflect.Descriptor instead.
+func (*CallToolResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CallToolResponse) GetIsError() bool {
+	if x != nil {
+		return x.IsError
+	}
+	return false
+}
+
+func (x *CallToolResponse) GetContentJson() string {
+	if x != nil {
+		return x.ContentJson
+	}
+	return ""
+}
+
+func (x *CallToolResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *CallToolResponse) GetAuditSeq() uint64 {
+	if x != nil {
+		return x.AuditSeq
+	}
+	return 0
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -1555,7 +1852,26 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\tplan_hash\x18\x03 \x01(\tR\bplanHash\x12#\n" +
 	"\rapprove_token\x18\x04 \x01(\tR\fapproveToken\x12#\n" +
 	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\x12\x1b\n" +
-	"\taudit_seq\x18\x06 \x01(\x04R\bauditSeq*\xf2\x01\n" +
+	"\taudit_seq\x18\x06 \x01(\x04R\bauditSeq\"\xb5\x01\n" +
+	"\x0eToolDescriptor\x12\x1b\n" +
+	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x1b\n" +
+	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\x12*\n" +
+	"\x11input_schema_json\x18\x04 \x01(\tR\x0finputSchemaJson\x12\x1b\n" +
+	"\tread_only\x18\x05 \x01(\bR\breadOnly\"\x12\n" +
+	"\x10ListToolsRequest\"i\n" +
+	"\x11ListToolsResponse\x127\n" +
+	"\x05tools\x18\x01 \x03(\v2!.daedalus.agent.v1.ToolDescriptorR\x05tools\x12\x1b\n" +
+	"\taudit_seq\x18\x02 \x01(\x04R\bauditSeq\"r\n" +
+	"\x0fCallToolRequest\x12\x1b\n" +
+	"\tplugin_id\x18\x01 \x01(\tR\bpluginId\x12\x1b\n" +
+	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12%\n" +
+	"\x0earguments_json\x18\x03 \x01(\tR\rargumentsJson\"\x92\x01\n" +
+	"\x10CallToolResponse\x12\x19\n" +
+	"\bis_error\x18\x01 \x01(\bR\aisError\x12!\n" +
+	"\fcontent_json\x18\x02 \x01(\tR\vcontentJson\x12#\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\x12\x1b\n" +
+	"\taudit_seq\x18\x04 \x01(\x04R\bauditSeq*\xf2\x01\n" +
 	"\x12SnapshotCapability\x12#\n" +
 	"\x1fSNAPSHOT_CAPABILITY_UNSPECIFIED\x10\x00\x12'\n" +
 	"#SNAPSHOT_CAPABILITY_BTRFS_SUBVOLUME\x10\x01\x12 \n" +
@@ -1588,14 +1904,16 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x17ROLLBACK_RESULT_PLANNED\x10\x01\x12\x1b\n" +
 	"\x17ROLLBACK_RESULT_APPLIED\x10\x02\x12\x1b\n" +
 	"\x17ROLLBACK_RESULT_REFUSED\x10\x03\x12\x1a\n" +
-	"\x16ROLLBACK_RESULT_FAILED\x10\x042\xc4\x04\n" +
+	"\x16ROLLBACK_RESULT_FAILED\x10\x042\xf1\x05\n" +
 	"\fAgentService\x12S\n" +
 	"\bRegister\x12\".daedalus.agent.v1.RegisterRequest\x1a#.daedalus.agent.v1.RegisterResponse\x12V\n" +
 	"\tHeartbeat\x12#.daedalus.agent.v1.HeartbeatRequest\x1a$.daedalus.agent.v1.HeartbeatResponse\x12\\\n" +
 	"\vApplyIntent\x12%.daedalus.agent.v1.ApplyIntentRequest\x1a&.daedalus.agent.v1.ApplyIntentResponse\x12a\n" +
 	"\x0fSnapshotRequest\x12).daedalus.agent.v1.SnapshotRequestRequest\x1a#.daedalus.agent.v1.SnapshotResponse\x12_\n" +
 	"\fReportStatus\x12&.daedalus.agent.v1.ReportStatusRequest\x1a'.daedalus.agent.v1.ReportStatusResponse\x12e\n" +
-	"\x0eRollbackIntent\x12(.daedalus.agent.v1.RollbackIntentRequest\x1a).daedalus.agent.v1.RollbackIntentResponseB;Z9github.com/Daedalusys/daedalus-sdk/proto/agent/v1;agentv1b\x06proto3"
+	"\x0eRollbackIntent\x12(.daedalus.agent.v1.RollbackIntentRequest\x1a).daedalus.agent.v1.RollbackIntentResponse\x12V\n" +
+	"\tListTools\x12#.daedalus.agent.v1.ListToolsRequest\x1a$.daedalus.agent.v1.ListToolsResponse\x12S\n" +
+	"\bCallTool\x12\".daedalus.agent.v1.CallToolRequest\x1a#.daedalus.agent.v1.CallToolResponseB;Z9github.com/Daedalusys/daedalus-sdk/proto/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -1610,7 +1928,7 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_agent_v1_agent_proto_goTypes = []any{
 	(SnapshotCapability)(0),        // 0: daedalus.agent.v1.SnapshotCapability
 	(RiskClass)(0),                 // 1: daedalus.agent.v1.RiskClass
@@ -1633,6 +1951,11 @@ var file_agent_v1_agent_proto_goTypes = []any{
 	(*RollbackStep)(nil),           // 18: daedalus.agent.v1.RollbackStep
 	(*RollbackIntentRequest)(nil),  // 19: daedalus.agent.v1.RollbackIntentRequest
 	(*RollbackIntentResponse)(nil), // 20: daedalus.agent.v1.RollbackIntentResponse
+	(*ToolDescriptor)(nil),         // 21: daedalus.agent.v1.ToolDescriptor
+	(*ListToolsRequest)(nil),       // 22: daedalus.agent.v1.ListToolsRequest
+	(*ListToolsResponse)(nil),      // 23: daedalus.agent.v1.ListToolsResponse
+	(*CallToolRequest)(nil),        // 24: daedalus.agent.v1.CallToolRequest
+	(*CallToolResponse)(nil),       // 25: daedalus.agent.v1.CallToolResponse
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	6,  // 0: daedalus.agent.v1.RegisterRequest.os_info:type_name -> daedalus.agent.v1.OsInfo
@@ -1646,23 +1969,28 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	18, // 8: daedalus.agent.v1.RollbackIntentRequest.steps:type_name -> daedalus.agent.v1.RollbackStep
 	5,  // 9: daedalus.agent.v1.RollbackIntentResponse.result:type_name -> daedalus.agent.v1.RollbackResult
 	18, // 10: daedalus.agent.v1.RollbackIntentResponse.steps:type_name -> daedalus.agent.v1.RollbackStep
-	7,  // 11: daedalus.agent.v1.AgentService.Register:input_type -> daedalus.agent.v1.RegisterRequest
-	9,  // 12: daedalus.agent.v1.AgentService.Heartbeat:input_type -> daedalus.agent.v1.HeartbeatRequest
-	11, // 13: daedalus.agent.v1.AgentService.ApplyIntent:input_type -> daedalus.agent.v1.ApplyIntentRequest
-	13, // 14: daedalus.agent.v1.AgentService.SnapshotRequest:input_type -> daedalus.agent.v1.SnapshotRequestRequest
-	16, // 15: daedalus.agent.v1.AgentService.ReportStatus:input_type -> daedalus.agent.v1.ReportStatusRequest
-	19, // 16: daedalus.agent.v1.AgentService.RollbackIntent:input_type -> daedalus.agent.v1.RollbackIntentRequest
-	8,  // 17: daedalus.agent.v1.AgentService.Register:output_type -> daedalus.agent.v1.RegisterResponse
-	10, // 18: daedalus.agent.v1.AgentService.Heartbeat:output_type -> daedalus.agent.v1.HeartbeatResponse
-	12, // 19: daedalus.agent.v1.AgentService.ApplyIntent:output_type -> daedalus.agent.v1.ApplyIntentResponse
-	14, // 20: daedalus.agent.v1.AgentService.SnapshotRequest:output_type -> daedalus.agent.v1.SnapshotResponse
-	17, // 21: daedalus.agent.v1.AgentService.ReportStatus:output_type -> daedalus.agent.v1.ReportStatusResponse
-	20, // 22: daedalus.agent.v1.AgentService.RollbackIntent:output_type -> daedalus.agent.v1.RollbackIntentResponse
-	17, // [17:23] is the sub-list for method output_type
-	11, // [11:17] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	21, // 11: daedalus.agent.v1.ListToolsResponse.tools:type_name -> daedalus.agent.v1.ToolDescriptor
+	7,  // 12: daedalus.agent.v1.AgentService.Register:input_type -> daedalus.agent.v1.RegisterRequest
+	9,  // 13: daedalus.agent.v1.AgentService.Heartbeat:input_type -> daedalus.agent.v1.HeartbeatRequest
+	11, // 14: daedalus.agent.v1.AgentService.ApplyIntent:input_type -> daedalus.agent.v1.ApplyIntentRequest
+	13, // 15: daedalus.agent.v1.AgentService.SnapshotRequest:input_type -> daedalus.agent.v1.SnapshotRequestRequest
+	16, // 16: daedalus.agent.v1.AgentService.ReportStatus:input_type -> daedalus.agent.v1.ReportStatusRequest
+	19, // 17: daedalus.agent.v1.AgentService.RollbackIntent:input_type -> daedalus.agent.v1.RollbackIntentRequest
+	22, // 18: daedalus.agent.v1.AgentService.ListTools:input_type -> daedalus.agent.v1.ListToolsRequest
+	24, // 19: daedalus.agent.v1.AgentService.CallTool:input_type -> daedalus.agent.v1.CallToolRequest
+	8,  // 20: daedalus.agent.v1.AgentService.Register:output_type -> daedalus.agent.v1.RegisterResponse
+	10, // 21: daedalus.agent.v1.AgentService.Heartbeat:output_type -> daedalus.agent.v1.HeartbeatResponse
+	12, // 22: daedalus.agent.v1.AgentService.ApplyIntent:output_type -> daedalus.agent.v1.ApplyIntentResponse
+	14, // 23: daedalus.agent.v1.AgentService.SnapshotRequest:output_type -> daedalus.agent.v1.SnapshotResponse
+	17, // 24: daedalus.agent.v1.AgentService.ReportStatus:output_type -> daedalus.agent.v1.ReportStatusResponse
+	20, // 25: daedalus.agent.v1.AgentService.RollbackIntent:output_type -> daedalus.agent.v1.RollbackIntentResponse
+	23, // 26: daedalus.agent.v1.AgentService.ListTools:output_type -> daedalus.agent.v1.ListToolsResponse
+	25, // 27: daedalus.agent.v1.AgentService.CallTool:output_type -> daedalus.agent.v1.CallToolResponse
+	20, // [20:28] is the sub-list for method output_type
+	12, // [12:20] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agent_v1_agent_proto_init() }
@@ -1676,7 +2004,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   15,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
