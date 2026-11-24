@@ -289,7 +289,7 @@ service AgentService {
   rpc CallTool(CallToolRequest) returns (CallToolResponse);
 }
 
-// ============== 只读工具调用面 ==============
+// ============== 工具调用面 ==============
 
 // ToolDescriptor 描述节点上一个可远程调用的 MCP 工具。
 message ToolDescriptor {
