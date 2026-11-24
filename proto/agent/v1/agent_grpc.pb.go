@@ -3,7 +3,7 @@
 // Spec: docs/superpowers/specs/2026-10-17-fleet-control-plane-design.md v3.1
 //   (§4.4 wire protocol, §7.3 C3 cert grace 1h, §6 B5 best-effort rollback)
 //
-// Six RPCs:
+// Eight RPCs:
 //
 //   Register          — agent上线,响应带 snapshot_capability 字段
 //   Heartbeat         — 保活 + pending intents 通知
@@ -11,6 +11,8 @@
 //   SnapshotRequest   — 控制面要求 agent 立刻 snapshot
 //   ReportStatus      — 审计事件回报(本地 JSONL 哈希链 → 控制面)
 //   RollbackIntent    — package/service 回滚(PLAN → 人审 → APPLY)
+//   ListTools         — 列出节点上允许远程调用的工具
+//   CallTool          — 调用一个工具(入参原样透传给插件)
 //
 // Transport: gRPC over mTLS, control plane 主动 outbound, agent inbound
 // listen 单端口(spec §4.4). cert 短 TTL 默认 24h, grace 1h(§7.3 C3).
@@ -50,6 +52,8 @@ const (
 	AgentService_SnapshotRequest_FullMethodName = "/daedalus.agent.v1.AgentService/SnapshotRequest"
 	AgentService_ReportStatus_FullMethodName    = "/daedalus.agent.v1.AgentService/ReportStatus"
 	AgentService_RollbackIntent_FullMethodName  = "/daedalus.agent.v1.AgentService/RollbackIntent"
+	AgentService_ListTools_FullMethodName       = "/daedalus.agent.v1.AgentService/ListTools"
+	AgentService_CallTool_FullMethodName        = "/daedalus.agent.v1.AgentService/CallTool"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -68,6 +72,10 @@ type AgentServiceClient interface {
 	ReportStatus(ctx context.Context, in *ReportStatusRequest, opts ...grpc.CallOption) (*ReportStatusResponse, error)
 	// 回滚通道:PLAN 出计划,APPLY 校验 token 后按步骤执行。
 	RollbackIntent(ctx context.Context, in *RollbackIntentRequest, opts ...grpc.CallOption) (*RollbackIntentResponse, error)
+	// 列出节点允许被远程调用的工具清单
+	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
+	// 调用一个工具;入参原样透传给插件,是否放行由节点侧判定
+	CallTool(ctx context.Context, in *CallToolRequest, opts ...grpc.CallOption) (*CallToolResponse, error)
 }
 
 type agentServiceClient struct {
@@ -138,6 +146,26 @@ func (c *agentServiceClient) RollbackIntent(ctx context.Context, in *RollbackInt
 	return out, nil
 }
 
+func (c *agentServiceClient) ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListToolsResponse)
+	err := c.cc.Invoke(ctx, AgentService_ListTools_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) CallTool(ctx context.Context, in *CallToolRequest, opts ...grpc.CallOption) (*CallToolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CallToolResponse)
+	err := c.cc.Invoke(ctx, AgentService_CallTool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -154,6 +182,10 @@ type AgentServiceServer interface {
 	ReportStatus(context.Context, *ReportStatusRequest) (*ReportStatusResponse, error)
 	// 回滚通道:PLAN 出计划,APPLY 校验 token 后按步骤执行。
 	RollbackIntent(context.Context, *RollbackIntentRequest) (*RollbackIntentResponse, error)
+	// 列出节点允许被远程调用的工具清单
+	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
+	// 调用一个工具;入参原样透传给插件,是否放行由节点侧判定
+	CallTool(context.Context, *CallToolRequest) (*CallToolResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -181,6 +213,12 @@ func (UnimplementedAgentServiceServer) ReportStatus(context.Context, *ReportStat
 }
 func (UnimplementedAgentServiceServer) RollbackIntent(context.Context, *RollbackIntentRequest) (*RollbackIntentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RollbackIntent not implemented")
+}
+func (UnimplementedAgentServiceServer) ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTools not implemented")
+}
+func (UnimplementedAgentServiceServer) CallTool(context.Context, *CallToolRequest) (*CallToolResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CallTool not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -311,6 +349,42 @@ func _AgentService_RollbackIntent_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_ListTools_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListToolsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ListTools(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ListTools_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ListTools(ctx, req.(*ListToolsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_CallTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CallToolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).CallTool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_CallTool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).CallTool(ctx, req.(*CallToolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -341,6 +415,14 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RollbackIntent",
 			Handler:    _AgentService_RollbackIntent_Handler,
+		},
+		{
+			MethodName: "ListTools",
+			Handler:    _AgentService_ListTools_Handler,
+		},
+		{
+			MethodName: "CallTool",
+			Handler:    _AgentService_CallTool_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

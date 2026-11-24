@@ -3,7 +3,7 @@
 // Spec: docs/superpowers/specs/2026-10-17-fleet-control-plane-design.md v3.1
 //   (§4.4 wire protocol, §7.3 C3 cert grace 1h, §6 B5 best-effort rollback)
 //
-// Six RPCs:
+// Eight RPCs:
 //
 //   Register          — agent上线,响应带 snapshot_capability 字段
 //   Heartbeat         — 保活 + pending intents 通知
@@ -11,6 +11,8 @@
 //   SnapshotRequest   — 控制面要求 agent 立刻 snapshot
 //   ReportStatus      — 审计事件回报(本地 JSONL 哈希链 → 控制面)
 //   RollbackIntent    — package/service 回滚(PLAN → 人审 → APPLY)
+//   ListTools         — 列出节点上允许远程调用的工具
+//   CallTool          — 调用一个工具(入参原样透传给插件)
 //
 // Transport: gRPC over mTLS, control plane 主动 outbound, agent inbound
 // listen 单端口(spec §4.4). cert 短 TTL 默认 24h, grace 1h(§7.3 C3).
@@ -281,4 +283,41 @@ service AgentService {
   rpc ReportStatus(ReportStatusRequest) returns (ReportStatusResponse);
   // 回滚通道:PLAN 出计划,APPLY 校验 token 后按步骤执行。
   rpc RollbackIntent(RollbackIntentRequest) returns (RollbackIntentResponse);
+  // 列出节点允许被远程调用的工具清单
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  // 调用一个工具;入参原样透传给插件,是否放行由节点侧判定
+  rpc CallTool(CallToolRequest) returns (CallToolResponse);
+}
+
+// ============== 只读工具调用面 ==============
+
+// ToolDescriptor 描述节点上一个可远程调用的 MCP 工具。
+message ToolDescriptor {
+  string plugin_id = 1;          // 如 "daedalus.shell"
+  string tool_name = 2;         // 如 "shell_exec"
+  string description = 3;
+  string input_schema_json = 4; // MCP tool 的 JSON Schema
+  bool read_only = 5;            // 插件自报的 ToolAnnotations.ReadOnlyHint
+}
+
+// ListToolsRequest 空请求:列出该节点允许被控制面远程调用的全部工具。
+message ListToolsRequest {}
+
+message ListToolsResponse {
+  repeated ToolDescriptor tools = 1;
+  uint64 audit_seq = 2; // 与节点审计链对齐的序号
+}
+
+// CallToolRequest 调用一个只读工具。节点侧自行判定是否放行。
+message CallToolRequest {
+  string plugin_id = 1;
+  string tool_name = 2;
+  string arguments_json = 3; // MCP tool 的入参,原样透传给插件
+}
+
+message CallToolResponse {
+  bool is_error = 1;       // 插件自报的业务错误
+  string content_json = 2; // MCP tool 的返回内容
+  string error_message = 3;
+  uint64 audit_seq = 4;
 }
