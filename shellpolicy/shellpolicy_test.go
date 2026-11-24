@@ -509,3 +509,30 @@ func TestValidateArgs_TextOptionExemptionIsNarrow(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateArgs_TextOptionConsumesNextToken 锁定「跳过下一个 token」这条安全
+// 前提的边界:取值位置上的 --file=... 只是 -g 的正则(required_argument,不打开
+// 文件),而同样的文件参数一旦离开取值位置,就必须被拒。
+func TestValidateArgs_TextOptionConsumesNextToken(t *testing.T) {
+	if err := ValidateArgs("journalctl", []string{"-g", "--file=/etc/shadow"}); err != nil {
+		t.Errorf("-g 的取值位置应豁免(取值只作正则): %v", err)
+	}
+	if err := ValidateArgs("journalctl", []string{"-g", "--file", "/etc/shadow"}); err == nil {
+		t.Error("离开取值位置的 /etc/shadow 必须被拒")
+	}
+}
+
+// TestValidateArgs_DeniedArgsWinEvenAsOptionValue 锁定拒绝表优先于豁免:被跳过
+// 的取值也不许藏拒绝词(DeniedArgs 扫整条 argv,不看位置)。
+func TestValidateArgs_DeniedArgsWinEvenAsOptionValue(t *testing.T) {
+	cases := [][]string{
+		{"-g", "-f"},
+		{"--grep", "--follow"},
+		{"-g", "I/O error", "-f"},
+	}
+	for _, args := range cases {
+		if err := ValidateArgs("journalctl", args); err == nil {
+			t.Errorf("ValidateArgs(journalctl, %q) 必须被拒", args)
+		}
+	}
+}

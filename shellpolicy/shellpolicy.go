@@ -283,6 +283,11 @@ func ValidateArg(arg string) error {
 //
 // 边界:豁免只作用于该选项的取值本身,同一 argv 里的其他路径参数照旧校验;
 // 不在本表里的选项(--file 等真·文件参数)仍走路径规则。
+//
+// 入表条件(安全前提):该选项必须是 required_argument(journalctl 的 -g 后面
+// 必须跟一个值),且取值永不被命令当文件打开。独立形式会让紧随其后的 token
+// 整块被跳过 —— 若将来把 optional_argument 的选项加进来,那条「取值」可能
+// 其实是另一个真·文件选项,豁免就会变成文件访问洞。新增条目必须同时满足这两条。
 var nonPathOptionValues = map[string]map[string]struct{}{
 	"journalctl": {"-g": {}, "--grep": {}},
 }
